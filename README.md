@@ -77,7 +77,10 @@ latency.)
 
 This project is built **BDD-first**: the Gherkin in [`features/`](features/) is
 the source of truth, executed by a hand-rolled zero-dependency harness on top of
-Node's built-in test runner.
+Node's built-in test runner — a ~250-line Gherkin parser + runner that supports
+the practical core of the grammar and rejects everything else loudly rather than
+mis-parsing it. See [`docs/GHERKIN.md`](docs/GHERKIN.md) for the grammar, the
+deliberate limits, and the API.
 
 ```bash
 npm test            # node --test — harness self-tests + feature scenarios

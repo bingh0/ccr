@@ -27,7 +27,7 @@ for (const file of fs.readdirSync(FEATURES_DIR).filter((f) => f.endsWith('.featu
   // definition. Catches intra-file ambiguity loudly and located, instead of
   // silently taking whichever pattern registered first.
   test(`${base} :: step definitions are unambiguous`, () => {
-    const parsed = parseFeature(fs.readFileSync(featureFile, 'utf8'));
+    const parsed = parseFeature(fs.readFileSync(featureFile, 'utf8'), featureFile);
     const steps = [...parsed.background, ...parsed.scenarios.flatMap((s) => s.steps)];
     const ambiguous = steps
       .filter((s) => registry.steps.filter((d) => s.text.match(d.re)).length > 1)
