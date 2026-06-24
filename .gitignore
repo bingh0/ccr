@@ -1,0 +1,28 @@
+# dependencies
+node_modules/
+
+# logs
+*.log
+npm-debug.log*
+
+# runtime state written by the sidecar / statusline
+*.tmp
+*.tmp.*
+
+# typecheck / build artifacts
+*.tsbuildinfo
+dist/
+
+# packaged tarballs + throwaway tester instructions (regenerate via npm pack)
+*.tgz
+*-TEST.md
+
+# os / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# local agent / tooling state (per-user; never shipped)
+.claude/

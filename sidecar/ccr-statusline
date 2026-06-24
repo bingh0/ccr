@@ -1,0 +1,9 @@
+#!/bin/sh
+# sidecar/ccr-statusline — the statusLine command injected via `claude --settings`
+# at launch. A single no-space path so it embeds cleanly in the settings JSON.
+# Resolves node itself (survives nvm upgrades) and runs `ccr statusline`, which
+# reads CCR_STATE_DIR from the environment the launcher exports.
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
+NODE="$(ls -d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort -V | tail -1)"
+[ -x "$NODE" ] || NODE="$(command -v node)"
+exec "$NODE" "$DIR/bin/ccr.js" statusline

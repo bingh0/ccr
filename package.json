@@ -1,0 +1,41 @@
+{
+  "name": "claude-code-runrate",
+  "version": "0.1.0",
+  "description": "Claude Code run-rate — subscription burn-rate & economy for your Claude Code sessions.",
+  "license": "MIT",
+  "author": "Bing Ho <reps-attic-riot@duck.com>",
+  "repository": { "type": "git", "url": "git+https://github.com/bingh0/ccr.git" },
+  "bugs": { "url": "https://github.com/bingh0/ccr/issues" },
+  "homepage": "https://github.com/bingh0/ccr#readme",
+  "type": "commonjs",
+  "bin": {
+    "ccr": "bin/ccr.js"
+  },
+  "engines": {
+    "node": ">=18.3"
+  },
+  "files": [
+    "bin",
+    "src",
+    "scripts/launch.sh",
+    "sidecar",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "typecheck": "tsc --noEmit -p jsconfig.json"
+  },
+  "keywords": [
+    "claude-code",
+    "burn-rate",
+    "rate-limit",
+    "economy",
+    "cli"
+  ],
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.7.0"
+  }
+}
