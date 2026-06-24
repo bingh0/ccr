@@ -15,7 +15,11 @@ const { dim, bold, green, red, yellow, cyan, flash, pctColor, bar, tok, fmtMins,
 const bandColor = { imminent: red, warn: yellow, ok: cyan };
 
 function wallRow(/** @type {any} */ row, /** @type {any} */ L, /** @type {boolean} */ tick, /** @type {number} */ labelW) {
-  const used = Math.round(row.est.usedPct);
+  // Truncate, don't round: Claude's own surfaces (`/usage`, claude.ai usage)
+  // floor the fractional `used_percentage` (e.g. 41.6 → "41%"). Math.round here
+  // read ~1pt high on values past the half-point. Display only — the burn/ROI
+  // math below still uses the raw fractional `row.est.usedPct`.
+  const used = Math.floor(row.est.usedPct);
   const ml = row.est.minutesLeft;
   const b = band(ml);
   // Per-row colour dot: green when the window resets before you'd hit it,
