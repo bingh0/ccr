@@ -24,7 +24,8 @@
   ],
   "scripts": {
     "test": "node --test",
-    "typecheck": "tsc --noEmit -p jsconfig.json"
+    "typecheck": "tsc --noEmit -p jsconfig.json",
+    "lint": "oxlint"
   },
   "keywords": [
     "claude-code",
@@ -36,6 +37,7 @@
   "dependencies": {},
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "oxlint": "^1.71.0",
     "typescript": "^5.7.0"
   }
 }
