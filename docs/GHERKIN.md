@@ -1,16 +1,43 @@
-# `test/gherkin.js` — a tiny zero-dependency Gherkin runner
+# `test/gherkin.js` — a minimal, zero-dependency BDD runner for JavaScript
 
-ccr executes its acceptance criteria (the `.feature` files in [`features/`](../features/))
-with a hand-rolled Gherkin parser + runner that sits on top of Node's built-in
-`node:test`. It is **~250 lines (≈200 of code, the rest its doc header), zero npm
-dependencies, no build step** — one of the smallest practical Gherkin runners
-you'll find, and small enough to read in one sitting.
+A **targeted** tool: it runs Gherkin (`.feature`) acceptance tests in plain
+JavaScript with **zero npm dependencies and no build step**, on top of Node's
+built-in `node:test`. In ccr it executes the criteria in
+[`features/`](../features/). At **~250 lines** (≈200 of code, the rest its doc
+header) it's one of the smallest practical Gherkin runners you'll find — small
+enough to read in one sitting.
 
 It exists because the alternative — pulling in `@cucumber/gherkin` + a Vitest/Jest
 binding — would add a dependency tree and a build step to a tool whose whole
 selling point is that `npx claude-code-runrate` installs instantly on every OS,
 Windows included. So we implement exactly the slice of Gherkin the feature files
 use, and **refuse the rest loudly** instead of pretending to support it.
+
+## When to reach for it — and when not
+
+This is a **targeted** option, not a general Cucumber replacement. It fits when
+*all* of these hold:
+
+- you want **BDD / Gherkin in JavaScript**, with **zero dependencies** and **no
+  build step**;
+- running on Node's built-in `node:test` is fine; and
+- the practical core of Gherkin (Feature / Background / Scenario / Scenario
+  Outline + Examples) covers your `.feature` files.
+
+That's the whole niche: the smallest thing that turns `.feature` files into real
+`node:test` tests, with nothing to install and nothing to compile.
+
+Once you outgrow that, reach for a heavier tool instead:
+
+- **TypeScript on a Vite / Vitest stack →**
+  [`@amiceli/vitest-cucumber`](https://github.com/amiceli/vitest-cucumber). Native
+  TypeScript, integrates with the Vitest runner (watch, UI, coverage), and
+  supports Cucumber Expressions, tags, hooks, data tables and doc strings. If
+  you're already on Vitest, use it — you have a toolchain and a build step, so the
+  zero-dep / no-build trade this parser makes buys you nothing.
+- **The full Gherkin grammar or the official toolchain →**
+  [`@cucumber/gherkin`](https://github.com/cucumber/gherkin) with a
+  Jest / Mocha / Vitest binding.
 
 ## The design rule
 
