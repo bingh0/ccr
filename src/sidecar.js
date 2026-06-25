@@ -14,8 +14,6 @@ const { renderFeed } = require('./render/feed');
 const { currentTranscriptPath, readNewLines, parseEvents } = require('./transcripts');
 
 const STATE_DIR = process.env.CCR_STATE_DIR || path.join(os.homedir(), '.ccr');
-const SNAPSHOT = path.join(STATE_DIR, 'last-status.json');
-const EXITED = path.join(STATE_DIR, 'exited');
 
 // Live feed accumulator: tail the current transcript incrementally (by byte
 // offset) and roll up tool/skill events + per-session stats. Reset on session
@@ -57,16 +55,29 @@ function draw(/** @type {string} */ s) {
   process.stdout.write('\x1b[H' + s.replace(/\n/g, '\x1b[K\n') + '\x1b[J');
 }
 
-function frame() {
-  if (fs.existsSync(EXITED)) { draw(bold('ccr') + '  ' + dim('session ended') + '\n'); return; }
+/**
+ * Compose the screen for one tick — the ended / waiting / unreadable / live
+ * states — and return it as a string (no I/O to stdout). Pure enough to test:
+ * the only inputs are the state dir on disk and `now`.
+ *
+ * @param {string} stateDir
+ * @param {{ now?: number }} [opts]
+ * @returns {string}
+ */
+function composeFrame(stateDir, opts = {}) {
+  const now = opts.now || Date.now();
+  const snapshot = path.join(stateDir, 'last-status.json');
+  const exited = path.join(stateDir, 'exited');
+
+  if (fs.existsSync(exited)) return bold('ccr') + '  ' + dim('session ended') + '\n';
   let raw = '';
-  try { raw = fs.readFileSync(SNAPSHOT, 'utf8'); } catch { /* none yet */ }
-  if (!raw.trim()) { draw(dim('ccr · waiting for the first status tick…') + '\n'); return; }
+  try { raw = fs.readFileSync(snapshot, 'utf8'); } catch { /* none yet */ }
+  if (!raw.trim()) return dim('ccr · waiting for the first status tick…') + '\n';
   let state;
-  try { state = JSON.parse(raw); } catch { draw(dim('ccr · status unreadable') + '\n'); return; }
+  try { state = JSON.parse(raw); } catch { return dim('ccr · status unreadable') + '\n'; }
   let out;
   try {
-    out = renderEconomy(normalizeStatus(state), { tick: Math.floor(Date.now() / 1000) % 2 === 0 });
+    out = renderEconomy(normalizeStatus(state), { tick: Math.floor(now / 1000) % 2 === 0 });
   } catch (e) {
     out = dim('ccr render error: ' + (e && e instanceof Error ? e.message : String(e)));
   }
@@ -78,7 +89,11 @@ function frame() {
       if (feedStr) out += '\n\n' + feedStr;
     }
   } catch { /* feed is optional */ }
-  draw(out.endsWith('\n') ? out : out + '\n');
+  return out.endsWith('\n') ? out : out + '\n';
+}
+
+function frame() {
+  draw(composeFrame(STATE_DIR, { now: Date.now() }));
 }
 
 function run() {
@@ -89,6 +104,7 @@ function run() {
   process.on('SIGTERM', stop);
 }
 
-// `updateFeed` is exported for tests (the incremental tail + session-switch
-// reset is the subtle part); the live loop uses `run`.
-module.exports = { run, updateFeed };
+// `updateFeed` + `composeFrame` are exported for tests (the incremental tail +
+// session-switch reset and the ended/waiting/render states are the subtle
+// parts); the live loop uses `run`.
+module.exports = { run, updateFeed, composeFrame };

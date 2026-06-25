@@ -8,6 +8,7 @@ npm-debug.log*
 # runtime state written by the sidecar / statusline
 *.tmp
 *.tmp.*
+ccr-settings-*.json
 
 # typecheck / build artifacts
 *.tsbuildinfo

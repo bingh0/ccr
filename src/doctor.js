@@ -34,10 +34,19 @@ function isExec(/** @type {string} */ f) {
   try { return (fs.statSync(f).mode & 0o111) !== 0; } catch { return false; }
 }
 
-/** @returns {number} exit code (0 = healthy) */
-function run() {
-  const REPO = path.join(__dirname, '..');
-  const isWin = process.platform === 'win32';
+/**
+ * @param {{ platform?: string, has?: (cmd: string) => (string|null),
+ *   homedir?: string, repo?: string, write?: (s: string) => void }} [opts]
+ *   side effects are injectable for testing; defaults hit the real environment
+ * @returns {number} exit code (0 = healthy)
+ */
+function run(opts = {}) {
+  const platform = opts.platform || process.platform;
+  const hasFn = opts.has || has;
+  const homedir = opts.homedir || os.homedir();
+  const REPO = opts.repo || path.join(__dirname, '..');
+  const write = opts.write || ((s) => { process.stdout.write(s); });
+  const isWin = platform === 'win32';
   const out = [bold('ccr doctor'), ''];
   let problems = 0;
 
@@ -46,29 +55,35 @@ function run() {
   out.push(nodeOk ? ok(`node ${process.version}`) : bad(`node ${process.version} — need >= 18.3`));
   if (!nodeOk) problems++;
 
-  const ccr = has('ccr');
+  const ccr = hasFn('ccr');
   out.push(ccr ? ok(`ccr on PATH (${stripControl(ccr)})`) : warn('ccr not on PATH — run `npm link` in the repo'));
   if (!ccr) problems++;
 
   if (isWin) {
-    // The live sidebar (tmux + bash) is WSL-only on native Windows — by design,
-    // not a problem. Say so plainly so a Windows user isn't told to "fix" it.
-    out.push(dim('· live sidebar (`ccr`) needs tmux + bash — for that, use WSL2.'));
-    out.push(dim('  The CLI (economy / statusline / resume / doctor) runs natively here.'));
+    // Native Windows hosts the sidecar in Windows Terminal — no tmux/bash/WSL.
+    const wt = hasFn('wt');
+    if (wt) {
+      out.push(ok(`Windows Terminal (sidecar host) (${stripControl(wt)})`));
+    } else {
+      out.push(warn('Windows Terminal not found — the sidecar needs it (winget install Microsoft.WindowsTerminal); the CLI still works'));
+      problems++;
+    }
+    // statusLine is injected inline (node + bin/ccr.js by path) via the per-launch
+    // temp settings file, so there's no shipped shim asset to check on Windows.
   } else {
-    const tmux = has('tmux');
-    out.push(tmux ? ok(`tmux (${stripControl(tmux)})`) : warn('tmux missing — needed for `ccr [profile]` sidebar (use WSL on Windows)'));
+    const tmux = hasFn('tmux');
+    out.push(tmux ? ok(`tmux (${stripControl(tmux)})`) : warn('tmux missing — needed for the `ccr [profile]` sidebar'));
     if (!tmux) problems++;
-    out.push(has('bash') ? ok('bash') : warn('bash missing — needed for the launcher'));
+    out.push(hasFn('bash') ? ok('bash') : warn('bash missing — needed for the launcher'));
 
     const sl = path.join(REPO, 'sidecar', 'ccr-statusline');
     out.push(isExec(sl) ? ok('sidecar/ccr-statusline is executable') : warn('sidecar/ccr-statusline not executable (the launcher self-heals this)'));
   }
 
-  const ccs = has('ccs');
+  const ccs = hasFn('ccs');
   if (ccs) {
     let profiles = [];
-    try { profiles = fs.readdirSync(path.join(os.homedir(), '.ccs', 'instances')).filter((p) => !p.startsWith('.')); } catch { /* none */ }
+    try { profiles = fs.readdirSync(path.join(homedir, '.ccs', 'instances')).filter((p) => !p.startsWith('.')); } catch { /* none */ }
     // Profile + path come from the filesystem; sanitize before display.
     out.push(ok(`ccs (${stripControl(ccs)}) · profiles: ${profiles.map(stripControl).join(', ') || '(none)'}`));
   } else {
@@ -77,7 +92,7 @@ function run() {
 
   // newest captured snapshot across ~/.ccr and its per-profile subdirs (state
   // lives under the user's home now, never world-shared /tmp).
-  const ccrDir = path.join(os.homedir(), '.ccr');
+  const ccrDir = path.join(homedir, '.ccr');
   const dirs = [ccrDir];
   try {
     for (const d of fs.readdirSync(ccrDir)) {
@@ -98,17 +113,12 @@ function run() {
     out.push(ok(`status captured ${ageMin}m ago (${stripControl(newest.d)})`));
     out.push(dim(`  buckets: ${keys.map(stripControl).join(', ') || '(none — API session?)'}`));
   } else {
-    out.push(warn(isWin
-      ? 'no status captured yet — wire `ccr statusline` into Claude Code (settings.json) to start capturing'
-      : 'no status captured yet — launch with `ccr` (or `ccr <profile>`) to start capturing'));
+    out.push(warn('no status captured yet — launch with `ccr` (or `ccr <profile>`) to start capturing'));
   }
 
   out.push('');
-  const allGood = isWin
-    ? 'all good — `ccr economy` for the panel, `ccr statusline` to wire into CC'
-    : 'all good — `ccr` to launch, `ccr economy` for the panel';
-  out.push(problems ? warn(`${problems} thing(s) to address above`) : ok(allGood));
-  process.stdout.write(out.join('\n') + '\n');
+  out.push(problems ? warn(`${problems} thing(s) to address above`) : ok('all good — `ccr` to launch, `ccr economy` for the panel'));
+  write(out.join('\n') + '\n');
   return problems ? 1 : 0;
 }
 
