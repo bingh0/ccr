@@ -21,6 +21,34 @@ function bar(/** @type {number} */ p, w = 10) {
   return '▓'.repeat(f) + '░'.repeat(w - f);
 }
 
+/**
+ * Clamp one line to `cols` visible columns: SGR escapes (`\x1b[…m`) pass through
+ * with zero width, printable chars count as 1. Appends a reset if it had to cut,
+ * so a severed colour run doesn't bleed into the cleared tail. Prevents the soft
+ * wrap that corrupts the sidecar's cursor-home redraw in a narrow pane. A
+ * non-positive `cols` (e.g. a non-TTY where columns is undefined) is a no-op.
+ * @param {string} line
+ * @param {number} [cols]
+ * @returns {string}
+ */
+function clampVisible(line, cols) {
+  if (!(typeof cols === 'number' && cols > 0)) return line;
+  const sgr = /\x1b\[[0-9;]*m/y;
+  let out = '';
+  let width = 0;
+  let i = 0;
+  while (i < line.length) {
+    sgr.lastIndex = i;
+    const m = sgr.exec(line);
+    if (m) { out += m[0]; i = sgr.lastIndex; continue; }
+    if (width >= cols) return out + '\x1b[0m';
+    out += line[i];
+    width += 1;
+    i += 1;
+  }
+  return out;
+}
+
 function tok(/** @type {number|null} */ n) {
   if (n == null) return '?';
   if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
@@ -46,4 +74,4 @@ function fmtReset(/** @type {number|null} */ min) {
   return `${m}m`;
 }
 
-module.exports = { e, dim, bold, green, red, yellow, cyan, flash, pctColor, bar, tok, fmtMins, fmtReset };
+module.exports = { e, dim, bold, green, red, yellow, cyan, flash, pctColor, bar, clampVisible, tok, fmtMins, fmtReset };

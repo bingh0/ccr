@@ -11,6 +11,7 @@ const os = require('node:os');
 const { normalizeStatus } = require('./normalize');
 const { renderEconomy } = require('./render/economy');
 const { renderFeed } = require('./render/feed');
+const { clampVisible } = require('./render/shared');
 const { currentTranscriptPath, readNewLines, parseEvents } = require('./transcripts');
 
 const STATE_DIR = process.env.CCR_STATE_DIR || path.join(os.homedir(), '.ccr');
@@ -58,23 +59,32 @@ function draw(/** @type {string} */ s) {
 /**
  * Compose the screen for one tick — the ended / waiting / unreadable / live
  * states — and return it as a string (no I/O to stdout). Pure enough to test:
- * the only inputs are the state dir on disk and `now`.
+ * the only inputs are the state dir on disk, `now`, and the pane width `cols`.
+ *
+ * `cols` is the pane's visible column count (process.stdout.columns); every line
+ * is clamped to it so a wide row can't soft-wrap and corrupt the cursor-home
+ * redraw in a narrow cmd/PowerShell/split pane. Omit it (non-TTY) for no clamp.
  *
  * @param {string} stateDir
- * @param {{ now?: number }} [opts]
+ * @param {{ now?: number, cols?: number }} [opts]
  * @returns {string}
  */
 function composeFrame(stateDir, opts = {}) {
   const now = opts.now != null ? opts.now : Date.now();
+  const cols = opts.cols;
+  const clamp = (/** @type {string} */ s) =>
+    (typeof cols === 'number' && cols > 0
+      ? s.split('\n').map((l) => clampVisible(l, cols)).join('\n')
+      : s);
   const snapshot = path.join(stateDir, 'last-status.json');
   const exited = path.join(stateDir, 'exited');
 
-  if (fs.existsSync(exited)) return bold('ccr') + '  ' + dim('session ended') + '\n';
+  if (fs.existsSync(exited)) return clamp(bold('ccr') + '  ' + dim('session ended') + '\n');
   let raw = '';
   try { raw = fs.readFileSync(snapshot, 'utf8'); } catch { /* none yet */ }
-  if (!raw.trim()) return dim('ccr · waiting for the first status tick…') + '\n';
+  if (!raw.trim()) return clamp(dim('ccr · waiting for the first status tick…') + '\n');
   let state;
-  try { state = JSON.parse(raw); } catch { return dim('ccr · status unreadable') + '\n'; }
+  try { state = JSON.parse(raw); } catch { return clamp(dim('ccr · status unreadable') + '\n'); }
   let out;
   try {
     out = renderEconomy(normalizeStatus(state), { tick: Math.floor(now / 1000) % 2 === 0 });
@@ -82,18 +92,22 @@ function composeFrame(stateDir, opts = {}) {
     out = dim('ccr render error: ' + (e && e instanceof Error ? e.message : String(e)));
   }
   // Live tool/skills feed below the panel — best-effort; never break the panel.
+  // Its inner width tracks the pane so args truncate cleanly (the clamp below is
+  // the hard safety net regardless).
   try {
     const tpath = currentTranscriptPath(state);
     if (tpath) {
-      const feedStr = renderFeed(updateFeed(tpath), { max: 6 });
+      const feedWidth = typeof cols === 'number' && cols > 0 ? Math.max(20, Math.min(48, cols - 2)) : 48;
+      const feedStr = renderFeed(updateFeed(tpath), { max: 6, width: feedWidth });
       if (feedStr) out += '\n\n' + feedStr;
     }
   } catch { /* feed is optional */ }
-  return out.endsWith('\n') ? out : out + '\n';
+  return clamp(out.endsWith('\n') ? out : out + '\n');
 }
 
 function frame() {
-  draw(composeFrame(STATE_DIR, { now: Date.now() }));
+  // Read columns each tick so a live resize re-flows on the next frame.
+  draw(composeFrame(STATE_DIR, { now: Date.now(), cols: process.stdout.columns }));
 }
 
 function run() {
