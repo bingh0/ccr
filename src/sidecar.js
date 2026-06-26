@@ -3,7 +3,7 @@
 // src/sidecar.js — the live economy panel that runs in the tmux sidebar.
 // Reads the per-session snapshot that `ccr statusline` writes (CCR_STATE_DIR),
 // re-renders the economy screen every second (so the imminent band flashes),
-// and shows a clean ended/​waiting state. Pure Node, zero dependencies.
+// and shows a clean ended/waiting state. Pure Node, zero dependencies.
 
 const fs = require('node:fs');
 const path = require('node:path');
