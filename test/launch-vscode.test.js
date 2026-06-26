@@ -12,6 +12,7 @@ const {
   osc52,
   buildBanner,
   copyToClipboard,
+  buildClaudeSpawn,
   run,
   hint,
 } = require('../src/launch-vscode.js');
@@ -79,6 +80,55 @@ test('copyToClipboard: never throws when no clipboard tool works', () => {
   }));
 });
 
+// --- buildClaudeSpawn: the Windows .cmd resolution seam --------------------
+// This is the seam the original PR left untested (run() stubs spawnClaude), so
+// a bare-name spawn that ENOENTs on Windows slipped through green CI.
+
+test('buildClaudeSpawn: POSIX is a direct exec of the bare binary', () => {
+  const b = buildClaudeSpawn('claude', ['--settings', '/tmp/s.json'], {
+    platform: 'linux',
+    which: () => '/usr/bin/claude',
+  });
+  assert.deepStrictEqual(b, { command: 'claude', args: ['--settings', '/tmp/s.json'], shell: false });
+});
+
+test('buildClaudeSpawn: Windows resolves claude.cmd and routes through a shell', () => {
+  const b = buildClaudeSpawn('claude', ['--settings', 'C:\\Temp Dir\\s.json'], {
+    platform: 'win32',
+    which: (n) => `C:\\Program Files\\nodejs\\${n}.cmd`,
+  });
+  assert.ok(!('error' in b), 'should not error on a normal path');
+  assert.strictEqual(b.shell, true, 'must run via shell so .cmd is executable');
+  assert.strictEqual(b.args, null);
+  // Each value individually quoted so the space in the temp path survives.
+  assert.strictEqual(
+    b.command,
+    '"C:\\Program Files\\nodejs\\claude.cmd" "--settings" "C:\\Temp Dir\\s.json"',
+  );
+  // Regression guard: it must NOT be a bare-name spawn (the original bug).
+  assert.notStrictEqual(b.command, 'claude');
+});
+
+test('buildClaudeSpawn: Windows falls back to the bare name when which() misses', () => {
+  const b = buildClaudeSpawn('ccs', ['x', '--settings', 'C:\\s.json'], {
+    platform: 'win32',
+    which: () => null,
+  });
+  assert.ok(!('error' in b));
+  assert.strictEqual(b.command, '"ccs" "x" "--settings" "C:\\s.json"');
+});
+
+test('buildClaudeSpawn: rejects " and % (cmd quote-break / expansion) with an error', () => {
+  for (const bad of ['C:\\a%PATH%\\s.json', 'C:\\a"b\\s.json']) {
+    const b = buildClaudeSpawn('claude', ['--settings', bad], {
+      platform: 'win32',
+      which: (n) => `C:\\bin\\${n}.cmd`,
+    });
+    assert.ok('error' in b, `must reject ${bad}`);
+    assert.match(b.error.message, /unsupported character/);
+  }
+});
+
 // --- run() / hint() with injected side effects -----------------------------
 
 function harness(over = {}) {
@@ -117,6 +167,17 @@ test('run: wires the banner, clipboard, Claude, and the exit sentinel', () => {
   assert.deepStrictEqual(w.spawnedClaude.args, ['--settings', 'C:\\Temp\\ccr-settings-x.json']);
   assert.strictEqual(w.droppedExited, 1, 'session-ended sentinel dropped after Claude exits');
   assert.deepStrictEqual(w.cleaned, ['C:\\Temp\\ccr-settings-x.json'], 'temp settings cleaned up');
+});
+
+test('run: a failed Claude spawn cleans up but does NOT mark the session ended', () => {
+  const { w, deps } = harness({
+    deps: { spawnClaude: (bin, args) => { w.spawnedClaude = { bin, args }; return { status: null, error: new Error('spawn claude ENOENT') }; } },
+  });
+  const code = run(undefined, deps);
+  assert.strictEqual(code, 1, 'a failed launch returns non-zero');
+  assert.match(w.err, /failed to launch Claude/);
+  assert.strictEqual(w.droppedExited, 0, 'must not flip sidecar to "session ended" when Claude never ran');
+  assert.deepStrictEqual(w.cleaned, ['C:\\Temp\\ccr-settings-x.json'], 'temp settings still cleaned up');
 });
 
 test('run: rejects an invalid profile before any spawn', () => {

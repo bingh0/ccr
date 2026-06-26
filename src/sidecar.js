@@ -65,7 +65,7 @@ function draw(/** @type {string} */ s) {
  * @returns {string}
  */
 function composeFrame(stateDir, opts = {}) {
-  const now = opts.now || Date.now();
+  const now = opts.now != null ? opts.now : Date.now();
   const snapshot = path.join(stateDir, 'last-status.json');
   const exited = path.join(stateDir, 'exited');
 

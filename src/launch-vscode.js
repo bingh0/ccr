@@ -142,13 +142,14 @@ function run(profile, deps = {}) {
   d.out(buildBanner({ sidecarCmd, splitKey: splitKeybinding(d.platform), hintCmd, color: d.color }));
   copyToClipboard(sidecarCmd, d);
 
-  // Run Claude in the current pane (blocks until exit), then flip the sidecar to
-  // its "session ended" state and clean up the temp settings file.
+  // Run Claude in the current pane (blocks until exit). The temp settings file is
+  // always removed; the "session ended" sentinel is only dropped if Claude
+  // actually ran — a failed spawn must NOT flip the sidecar to "ended".
   const parts = st.ccCmd.split(' ');
   const r = d.spawnClaude(parts[0], [...parts.slice(1), '--settings', settingsFile]);
-  d.dropExited(st.stateDir);
   d.cleanup(settingsFile);
   if (r && r.error) { d.err(`ccr: failed to launch Claude: ${r.error.message}\n`); return 1; }
+  d.dropExited(st.stateDir);
   return r && typeof r.status === 'number' ? r.status : 0;
 }
 
@@ -167,6 +168,62 @@ function hint(stateDir, deps = {}) {
   d.out(buildBanner({ sidecarCmd, splitKey: splitKeybinding(d.platform), hintCmd, color: d.color }));
   copyToClipboard(sidecarCmd, d);
   return 0;
+}
+
+/**
+ * Build the spawn invocation for launching Claude in the CURRENT pane.
+ *
+ * On POSIX this is a direct exec of `bin`. On Windows the resolved binary is
+ * typically `claude.cmd` / `ccs.cmd`, which Node's spawnSync refuses to run by
+ * bare name without a shell (it would ENOENT) — so we resolve the real path via
+ * `which` and run it through cmd.exe with our own quoting, which keeps a temp
+ * path containing spaces working. We reject the two characters cmd quoting
+ * cannot neutralize — `"` (ends the quote) and `%` (cmd expansion), plus CR/LF —
+ * with a clear error rather than spawn a broken or hijackable line. This mirrors
+ * the WT_UNSAFE policy in launch-win.js; trust boundary is the user's own env.
+ *
+ * Returns either a spawn descriptor or, on a rejected character, an `{ error }`
+ * that run() surfaces exactly like a spawn failure.
+ *
+ * @param {string} bin
+ * @param {string[]} args
+ * @param {{ platform: string, which: (name: string) => (string|null) }} o
+ * @returns {{ command: string, args: string[]|null, shell: boolean } | { error: Error }}
+ */
+function buildClaudeSpawn(bin, args, o) {
+  if (o.platform !== 'win32') {
+    return { command: bin, args, shell: false };
+  }
+  const resolved = o.which(bin) || bin;
+  const all = [resolved, ...args.map(String)];
+  const bad = all.find((p) => /["%\r\n]/.test(p));
+  if (bad !== undefined) {
+    return { error: new Error(
+      `argument contains an unsupported character (", %, or newline) for the Windows shell: ${JSON.stringify(bad)}`,
+    ) };
+  }
+  // cmd.exe strips the outer quote pair Node adds around the /c payload, leaving
+  // each value individually quoted — spaces are safe, `"`/`%` are pre-rejected.
+  return { command: all.map((p) => `"${p}"`).join(' '), args: null, shell: true };
+}
+
+/**
+ * Real-environment Claude launcher: resolve+route through cmd.exe on Windows
+ * (see buildClaudeSpawn), direct exec elsewhere. Stays injectable so tests drive
+ * run() without spawning — but the Windows resolution itself is unit-tested via
+ * buildClaudeSpawn so this seam can't silently regress to a bare-name spawn.
+ *
+ * @param {string} bin
+ * @param {string[]} args
+ * @returns {{ status: number|null, error?: Error }}
+ */
+function defaultSpawnClaude(bin, args) {
+  const built = buildClaudeSpawn(bin, args, { platform: process.platform, which: defaultWhich });
+  if ('error' in built) return { status: null, error: built.error };
+  const { spawnSync } = require('node:child_process');
+  return built.shell
+    ? spawnSync(built.command, { stdio: 'inherit', shell: true })
+    : spawnSync(built.command, built.args || [], { stdio: 'inherit' });
 }
 
 /** @param {string} name @returns {string|null} */
@@ -201,7 +258,7 @@ function withDefaults(deps) {
     dropExited: deps.dropExited || ((dir) => { try { require('node:fs').writeFileSync(path.join(dir, 'exited'), ''); } catch { /* best effort */ } }),
     writeSettings: deps.writeSettings || ((s) => inject.writeSettingsFile(s)),
     cleanup: deps.cleanup || ((f) => inject.cleanupSettingsFile(f)),
-    spawnClaude: deps.spawnClaude || ((bin, args) => require('node:child_process').spawnSync(bin, args, { stdio: 'inherit' })),
+    spawnClaude: deps.spawnClaude || defaultSpawnClaude,
     spawnCopy: deps.spawnCopy || ((cmd, args, input) => require('node:child_process').spawnSync(cmd, args, { input, stdio: ['pipe', 'ignore', 'ignore'] })),
   };
 }
@@ -228,4 +285,4 @@ function withDefaults(deps) {
  * @property {(cmd: string, args: string[], input: string) => {status: number|null, error?: Error}} spawnCopy
  */
 
-module.exports = { splitKeybinding, sidecarPasteCommand, osc52, buildBanner, copyToClipboard, run, hint };
+module.exports = { splitKeybinding, sidecarPasteCommand, osc52, buildBanner, copyToClipboard, buildClaudeSpawn, run, hint };
