@@ -105,18 +105,48 @@ function composeFrame(stateDir, opts = {}) {
   return clamp(out.endsWith('\n') ? out : out + '\n');
 }
 
+/**
+ * Resolve the column budget to clamp the panel to. `process.stdout.columns` is
+ * authoritative when present (live resize re-flows on the next frame), but inside
+ * the Windows launcher's `cmd /c` conpty pane it is unreliable — often undefined
+ * or the FULL window width rather than the narrow split. So the launcher injects
+ * the computed pane width as CCR_SIDECAR_COLS; we take the SMALLER of the two,
+ * which is safe whichever is wrong: a bogus full-width `columns` can't defeat the
+ * hint, and a missing hint (Linux/tmux, standalone `ccr sidecar`) leaves the live
+ * value untouched. Returns undefined only when neither is known (no clamp).
+ *
+ * @returns {number|undefined}
+ */
+function resolveCols() {
+  const live = process.stdout.columns;
+  const haveLive = typeof live === 'number' && live > 0;
+  const hint = parseInt(process.env.CCR_SIDECAR_COLS || '', 10);
+  const haveHint = Number.isFinite(hint) && hint > 0;
+  if (haveLive && haveHint) return Math.min(live, hint);
+  if (haveHint) return hint;
+  return haveLive ? live : undefined;
+}
+
 function frame() {
   // Read columns each tick so a live resize re-flows on the next frame.
-  draw(composeFrame(STATE_DIR, { now: Date.now(), cols: process.stdout.columns }));
+  draw(composeFrame(STATE_DIR, { now: Date.now(), cols: resolveCols() }));
 }
 
 /**
  * The live loop. With `exitOnEnd` (the Windows launcher passes `--exit-on-end`),
- * the sidecar shows "session ended" for a beat then closes its own pane once the
- * `exited` sentinel appears — so a `cmd /c` pane folds away on session end rather
- * than lingering, matching the tmux launcher's kill-session sweep. Without it
- * (Linux/tmux, standalone `ccr sidecar`) the loop runs until signalled, exactly
- * as before. Side effects are injectable so the end-sweep is unit-testable.
+ * the sidecar closes its own pane as soon as the `exited` sentinel appears — so a
+ * `cmd /c` pane folds away on session end rather than lingering, matching the tmux
+ * launcher's kill-session sweep. Without it (Linux/tmux, standalone `ccr sidecar`)
+ * the loop runs until signalled, exactly as before.
+ *
+ * For the fastest, correctly-ordered close, the sentinel is POLLED faster than the
+ * render cadence when `exitOnEnd` (a redraw is ~1s; waiting a full second just to
+ * NOTICE the exit would dominate the close time). A single interval ticks at
+ * `pollMs`; the expensive redraw is throttled to ~1s, while the cheap sentinel
+ * check runs every poll. On exit we paint "session ended" once and close after a
+ * short `graceMs`. The launcher's pane 0 then lingers slightly longer (see
+ * buildWtArgs) so this RIGHT pane closes first and the border sweeps left→right.
+ * Side effects are injectable so the end-sweep is unit-testable.
  *
  * @param {{ exitOnEnd?: boolean, stateDir?: string, graceMs?: number,
  *   tick?: () => void, sentinelExists?: () => boolean,
@@ -128,7 +158,9 @@ function frame() {
 function run(opts = {}) {
   const stateDir = opts.stateDir || STATE_DIR;
   const exitOnEnd = opts.exitOnEnd != null ? opts.exitOnEnd : (process.env.CCR_SIDECAR_EXIT_ON_END === '1');
-  const graceMs = opts.graceMs != null ? opts.graceMs : 1500;
+  // Tiny grace so the "session ended" frame paints before we close — kept short
+  // since this drives the close speed (the launcher tunes pane 0 to outlast it).
+  const graceMs = opts.graceMs != null ? opts.graceMs : 200;
   const tick = opts.tick || frame;
   const sentinelExists = opts.sentinelExists || (() => fs.existsSync(path.join(stateDir, 'exited')));
   const setIntervalFn = opts.setIntervalFn || setInterval;
@@ -138,22 +170,32 @@ function run(opts = {}) {
   const exit = opts.exit || (() => process.exit(0));
   const onSignal = opts.onSignal || ((sig, handler) => process.on(sig, handler));
 
+  // Poll the sentinel fast when we have to detect the end; keep the redraw at ~1s.
+  const RENDER_MS = 1000;
+  const pollMs = exitOnEnd ? 120 : RENDER_MS;
+
   let id = null;
   let endTimer = null;
+  let sinceRender = RENDER_MS; // render on the first loop
   const stop = () => {
     if (id != null) clearIntervalFn(id);
     if (endTimer != null) clearTimeoutFn(endTimer);
     exit();
   };
-  const loop = () => {
-    tick();
-    // Once the session has ended, show it for a beat then sweep this pane closed.
+  const checkEnd = () => {
+    // Once the session has ended, paint it once then sweep this pane closed.
     if (exitOnEnd && endTimer == null && sentinelExists()) {
+      tick();
       endTimer = setTimeoutFn(stop, graceMs);
     }
   };
+  const loop = () => {
+    sinceRender += pollMs;
+    if (sinceRender >= RENDER_MS) { sinceRender = 0; tick(); }
+    checkEnd();
+  };
   loop();
-  id = setIntervalFn(loop, 1000);
+  id = setIntervalFn(loop, pollMs);
   onSignal('SIGINT', stop);
   onSignal('SIGTERM', stop);
   return stop;

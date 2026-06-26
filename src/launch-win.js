@@ -130,6 +130,30 @@ function paneCommand(stateDir, body) {
 }
 
 /**
+ * Compute the column budget for the sidecar pane so it can clamp every line and
+ * never soft-wrap. `process.stdout.columns` inside the `cmd /c` conpty pane is
+ * unreliable (often undefined or the FULL window width, not the narrow split),
+ * so the launcher — whose own stdout DOES report the live terminal width —
+ * computes the pane width here and injects it as CCR_SIDECAR_COLS.
+ *
+ * A vertical split (-V, sidebar on the right) gets `frac` of the width, minus one
+ * column for the pane divider. A horizontal split (-H, sidebar on the bottom)
+ * keeps the full width. Returns null when the terminal width is unknown (non-TTY
+ * launch) — the sidecar then falls back to whatever it can detect.
+ *
+ * @param {number|undefined} termCols the launcher's own terminal width
+ * @param {number} fracNum the sidebar fraction (e.g. 0.34)
+ * @param {'-V'|'-H'} splitFlag
+ * @returns {number|null}
+ */
+function sidecarCols(termCols, fracNum, splitFlag) {
+  const t = Number(termCols);
+  if (!Number.isFinite(t) || t <= 0) return null;
+  if (splitFlag === '-H') return Math.max(20, Math.floor(t)); // bottom split keeps full width
+  return Math.max(20, Math.floor(t * fracNum) - 1);            // right split: fraction, less the divider
+}
+
+/**
  * Build the argv passed to wt.exe (excluding the wt.exe path itself):
  *   -w 0 new-tab --title Claude cmd /c "<pane0>" ; split-pane -H -s <frac> cmd /c "<pane1>"
  *
@@ -141,16 +165,21 @@ function paneCommand(stateDir, body) {
  * Teardown mirrors the tmux launcher's sweep (launch.sh: `… ; touch exited; …;
  * kill-session`): both panes run under `cmd /c`, so each closes when its command
  * ends. On Claude exit pane 0 drops the `exited` sentinel and deletes the temp
- * settings file, then closes; the sidecar runs with `--exit-on-end` so it shows
- * "session ended" briefly then exits, closing pane 1 — the whole tab folds back
- * to where you started, instead of the sidecar lingering on "session ended".
+ * settings file; the sidecar runs with `--exit-on-end` so it detects the exit
+ * within ~120ms and closes pane 1 after a ~200ms grace (see sidecar.run).
+ *
+ * Close ORDER drives the sweep: pane 0 then lingers (SWEEP_LINGER ≈ 1s) past the
+ * sidecar's ~320ms close so the RIGHT pane collapses FIRST and Claude expands
+ * rightward to fill it — the sidebar border sweeps left→right and the tab folds,
+ * instead of pane 0 vanishing first and the sidecar ballooning right→left.
  *
  * Throws if any interpolated value contains a character that would break (or, in
  * the case of %, hijack) the cmd /c payload — see isWtArgSafe. run() catches
  * this and reports a clean error instead of spawning a broken command.
  *
  * @param {{ ccCmd: string, settingsFile: string, stateDir: string,
- *   node: string, ccrJs: string, sidebarPct?: number, sidebarSide?: string }} o
+ *   node: string, ccrJs: string, sidebarPct?: number, sidebarSide?: string,
+ *   termCols?: number }} o
  * @returns {string[]}
  */
 function buildWtArgs(o) {
@@ -173,11 +202,26 @@ function buildWtArgs(o) {
   const splitFlag = sidebarSplitFlag(o.sidebarSide);
   const exited = path.win32.join(stateDir, 'exited');
 
+  // After Claude exits we drop the sentinel + clean the settings file, then idle
+  // ~1s so pane 1 (which now detects the exit within ~120ms and closes after a
+  // ~200ms grace) folds FIRST and the border sweeps left→right. `ping -n 2`
+  // loopback is a reliable ~1s — its fixed inter-ping gap can't undershoot the
+  // sidecar's close the way `timeout /t 1` (0–1s, second-aligned) could, and it
+  // has none of `timeout`'s stdin quirks. ~1s is the floor: cmd.exe's wait
+  // primitives have 1-second granularity, so a tighter robust delay isn't
+  // available without fragile tricks. Silent under `>nul`.
+  const SWEEP_LINGER = 'ping -n 2 127.0.0.1 >nul';
   const pane0 = paneCommand(
     stateDir,
-    `${ccCmd} --settings "${settingsFile}" & type nul > "${exited}" & del /q "${settingsFile}"`,
+    `${ccCmd} --settings "${settingsFile}" & type nul > "${exited}" & del /q "${settingsFile}" & ${SWEEP_LINGER}`,
   );
-  const pane1 = paneCommand(stateDir, `"${node}" "${ccrJs}" sidecar --exit-on-end`);
+  // Inject the computed pane width so the sidecar clamps cleanly even when its own
+  // process.stdout.columns is unreliable inside the cmd /c conpty pane.
+  const cols = sidecarCols(o.termCols, Number(frac), splitFlag);
+  const sidecarBody =
+    (cols != null ? `set "CCR_SIDECAR_COLS=${cols}"&& ` : '') +
+    `"${node}" "${ccrJs}" sidecar --exit-on-end`;
+  const pane1 = paneCommand(stateDir, sidecarBody);
 
   return [
     '-w', '0', 'new-tab', '--title', 'Claude', 'cmd', '/c', pane0,
@@ -227,6 +271,9 @@ function withDefaults(deps) {
   return {
     env,
     home,
+    // The launcher's own stdout reports the live terminal width — the sidecar's
+    // does not, inside its cmd /c pane (see sidecarCols). undefined on non-TTY.
+    cols: deps.cols != null ? deps.cols : process.stdout.columns,
     node: deps.node || process.execPath,
     ccrJs: deps.ccrJs || path.join(__dirname, '..', 'bin', 'ccr.js'),
     out: deps.out || ((s) => { process.stdout.write(s); }),
@@ -356,6 +403,7 @@ function run(profile, deps = {}) {
       ccrJs: d.ccrJs,
       sidebarPct: Number.isFinite(pct) ? pct : DEFAULT_SIDEBAR_PCT,
       sidebarSide: d.env.CCR_SIDEBAR_SIDE || DEFAULT_SIDEBAR_SIDE,
+      termCols: d.cols,
     });
   } catch (e) {
     d.err(`ccr: ${e instanceof Error ? e.message : String(e)}\n`);
@@ -376,6 +424,7 @@ function run(profile, deps = {}) {
  * @typedef {object} Deps
  * @property {NodeJS.ProcessEnv} env
  * @property {string} home
+ * @property {number|undefined} cols
  * @property {string} node
  * @property {string} ccrJs
  * @property {(s: string) => void} out
@@ -400,6 +449,7 @@ module.exports = {
   resolveProfileState,
   sidebarFraction,
   sidebarSplitFlag,
+  sidecarCols,
   buildWtArgs,
   findWindowsTerminal,
   run,

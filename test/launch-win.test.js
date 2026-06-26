@@ -14,6 +14,7 @@ const {
   resolveProfileState,
   sidebarFraction,
   sidebarSplitFlag,
+  sidecarCols,
   buildWtArgs,
   findWindowsTerminal,
 } = require('../src/launch-win.js');
@@ -123,6 +124,43 @@ test('sidebarSplitFlag: side → wt split flag, defaulting to right (-V)', () =>
   assert.strictEqual(sidebarSplitFlag('sideways'), '-V');
 });
 
+test('sidecarCols: right split → fraction of width minus the divider', () => {
+  // 120 cols * 0.34 = 40.8 → floor 40, minus 1 for the pane divider = 39.
+  assert.strictEqual(sidecarCols(120, 0.34, '-V'), 39);
+  assert.strictEqual(sidecarCols(200, 0.5, '-V'), 99);
+});
+
+test('sidecarCols: bottom split keeps the full width', () => {
+  assert.strictEqual(sidecarCols(120, 0.34, '-H'), 120);
+});
+
+test('sidecarCols: unknown terminal width → null (no hint injected)', () => {
+  assert.strictEqual(sidecarCols(undefined, 0.34, '-V'), null);
+  assert.strictEqual(sidecarCols(0, 0.34, '-V'), null);
+  assert.strictEqual(sidecarCols(NaN, 0.34, '-V'), null);
+});
+
+test('sidecarCols: clamps tiny panes up to a usable floor', () => {
+  assert.strictEqual(sidecarCols(10, 0.34, '-V'), 20);
+});
+
+test('buildWtArgs: injects CCR_SIDECAR_COLS into pane 1 when termCols is known', () => {
+  const a = buildWtArgs({ ...baseArgsInput, termCols: 120 });
+  const sep = a.indexOf(';');
+  const pane1 = a[sep + 7];
+  // 120 * 0.34 → 40 → 39 after the divider.
+  assert.match(pane1, /set "CCR_SIDECAR_COLS=39"/);
+  // The state dir is still set, and it precedes the node invocation.
+  assert.match(pane1, /set "CCR_STATE_DIR=C:\\Users\\me\\.ccr"/);
+  assert.match(pane1, /sidecar --exit-on-end/);
+});
+
+test('buildWtArgs: omits CCR_SIDECAR_COLS when termCols is unknown', () => {
+  const a = buildWtArgs(baseArgsInput); // no termCols
+  const sep = a.indexOf(';');
+  assert.doesNotMatch(a[sep + 7], /CCR_SIDECAR_COLS/);
+});
+
 test('buildWtArgs: sidebarSide bottom uses a horizontal split (-H)', () => {
   const a = buildWtArgs({ ...baseArgsInput, sidebarSide: 'bottom' });
   const sep = a.indexOf(';');
@@ -148,6 +186,13 @@ test('buildWtArgs: pane 0 deletes the temp settings file on exit (@AC8)', () => 
   const a = buildWtArgs(baseArgsInput);
   const pane0 = a[7];
   assert.match(pane0, /& del \/q "C:\\Temp\\ccr-settings-ab12\.json"/);
+});
+
+test('buildWtArgs: pane 0 lingers after cleanup so the sidecar closes first', () => {
+  const pane0 = buildWtArgs(baseArgsInput)[7];
+  // The linger runs AFTER the sentinel + settings cleanup, so the right pane
+  // (sidecar) collapses before pane 0 → border sweeps left→right.
+  assert.match(pane0, /& del \/q "[^"]+" & ping -n 2 127\.0\.0\.1 >nul$/);
 });
 
 test('buildWtArgs: settings passed by path, never inline JSON (@AC9 @AC8)', () => {

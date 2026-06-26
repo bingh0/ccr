@@ -49,7 +49,10 @@ through its command line. Rationale:
   `npx claude-code-runrate` instant-install promise is preserved.
 - **Glyphs, color, mouse, scrollback, clipboard for free.** Windows Terminal is a
   ConPTY host: the block glyphs (`▓ ░ ●`) and ANSI used by `renderEconomy` and
-  the sidecar's cursor-home redraw work without change.
+  the sidecar's cursor-home redraw work without change. (One ConPTY caveat: a
+  split pane's `process.stdout.columns` is unreliable, so the launcher injects the
+  computed pane width as `CCR_SIDECAR_COLS` and the sidecar clamps to it — see
+  §4.2 step 6 and §5.2.)
 - **It already runs Claude Code well.** Pane 0 is just a normal interactive
   Claude session — no PTY shimming on our side.
 
@@ -64,10 +67,19 @@ through its command line. Rationale:
 
 ### Layout produced
 
-`wt.exe` opens one window, runs Claude in the first pane, then `split-pane`
-runs the sidecar at ~34% width (matching upstream `CCR_SIDEBAR_PCT` default of
-34). The split is vertical (`-V`, sidecar on the right) by default; set
-`CCR_SIDEBAR_SIDE=bottom` for a horizontal split (`-H`, sidecar below).
+`wt.exe -w 0 new-tab` reuses the **current** Windows Terminal window (a new tab in
+the window you ran `ccr` from, not a separate window), runs Claude in the first
+pane, then `split-pane` runs the sidecar at ~34% width (matching upstream
+`CCR_SIDEBAR_PCT` default of 34). The split is vertical (`-V`, sidecar on the
+right) by default; set `CCR_SIDEBAR_SIDE=bottom` for a horizontal split (`-H`,
+sidecar below).
+
+On exit the tab folds itself back: both panes run under `cmd /c` (not `cmd /k`),
+so each closes when its command ends. Claude's pane drops the `exited` sentinel
+then lingers ~1s; the sidecar (`--exit-on-end`) detects the sentinel within
+~120ms and closes after a ~200ms grace — so the **right pane collapses first** and
+the border sweeps left→right as Claude expands to fill, then the tab closes. This
+mirrors the tmux launcher's `kill-session` sweep.
 
 ---
 
@@ -119,10 +131,13 @@ dependency. It must:
    command-line JSON-quoting minefield** that an inline `--settings '{...}'` would
    hit. Best-effort cleanup of the temp file after the window closes.
 6. **Build and spawn the `wt.exe` command** (§5.1), passing `CCR_STATE_DIR` into
-   **both** panes' environments.
-7. **Sentinel on exit** — pane 0 drops `STATE/exited` when Claude exits so the
-   sidecar shows a clean "session ended" state (`src/sidecar.js` already reads
-   this).
+   **both** panes' environments and `CCR_SIDECAR_COLS` (the computed pane width)
+   into the sidecar's, so it clamps every line and never soft-wraps in the narrow
+   split (ConPTY's per-pane `process.stdout.columns` can't be trusted here).
+7. **Sentinel + sweep on exit** — pane 0 drops `STATE/exited` when Claude exits
+   (sidecar flips to a clean "session ended"), then lingers ~1s so the sidecar's
+   `--exit-on-end` pane closes first; both `cmd /c` panes fold and the tab closes,
+   border sweeping left→right (§2 "Layout produced").
 
 ### 4.3 (optional) `sidecar/ccr.wt.fragment.json` — keybinding fragment
 
@@ -162,7 +177,10 @@ function run(profile) { /* §4.2 steps 1–7; returns an exit code */ }
 function findWindowsTerminal() { /* `where wt` */ }
 
 /** Build the argv for wt.exe: pane 0 = claude --settings <file>; split; pane 1 = ccr sidecar. */
-function buildWtArgs({ ccCmd, settingsFile, stateDir, node, ccrJs, sidebarPct, sidebarSide }) { /* ... */ }
+function buildWtArgs({ ccCmd, settingsFile, stateDir, node, ccrJs, sidebarPct, sidebarSide, termCols }) { /* ... */ }
+
+/** Computed sidecar pane width (for CCR_SIDECAR_COLS), or null if termCols is unknown. */
+function sidecarCols(termCols, fracNum, splitFlag) { /* ... */ }
 
 /** The graceful no-Windows-Terminal fallback (prints native-CLI guidance). */
 function fallbackNoWt() { /* returns 1 */ }
@@ -171,13 +189,25 @@ function fallbackNoWt() { /* returns 1 */ }
 `buildWtArgs` produces something equivalent to:
 
 ```
-wt.exe new-tab  --title "Claude" cmd /k "set CCR_STATE_DIR=<state>&& claude --settings <file>"
-       `;` split-pane -V -s 0.34 cmd /k "set CCR_STATE_DIR=<state>&& node <ccrJs> sidecar"
+wt.exe -w 0 new-tab --title "Claude" cmd /c "set CCR_STATE_DIR=<state>&& claude --settings <file> & type nul > <state>\exited & del /q <file> & ping -n 2 127.0.0.1 >nul"
+       `;` split-pane -V -s 0.34 cmd /c "set CCR_STATE_DIR=<state>&& set CCR_SIDECAR_COLS=<n>&& node <ccrJs> sidecar --exit-on-end"
 ```
 
-(The `;` pane separator must be passed as its own argv token; env is injected
-per-pane via `cmd /k set VAR=...&& ...` so each pane inherits `CCR_STATE_DIR`
-exactly like the tmux `set-environment` / `export` preamble does upstream.)
+Notes:
+- `-w 0` targets the **current** window (reuse, not a new window); the `;` pane
+  separator is its own argv token.
+- Env is injected per-pane via `cmd /c set VAR=...&& ...` so each pane inherits
+  `CCR_STATE_DIR` (and the sidecar `CCR_SIDECAR_COLS`) like the tmux
+  `set-environment` / `export` preamble upstream.
+- Both panes run under `cmd /c` (not `/k`) so they self-close. Pane 0's tail —
+  `type nul > exited` (sentinel) → `del /q <file>` (settings cleanup) →
+  `ping -n 2 127.0.0.1 >nul` (~1s linger) — sequences the teardown so the sidecar
+  collapses first (§2, §4.2 step 7). `ping` is a reliable ~1s wait; cmd.exe's
+  wait primitives have 1-second granularity, so that is the practical floor.
+- `termCols` is the launcher's own `process.stdout.columns`; `sidecarCols` turns
+  it into the pane width (fraction of width for `-V`, full width for `-H`). It is
+  omitted when unknown (non-TTY launch), and the sidecar then falls back to
+  `min(live columns, hint)` with no hint.
 
 ### 5.3 Settings injection — `command` value
 
@@ -209,17 +239,18 @@ New behavior:
 
 | tmux feature (`launch.sh` / `ccr.tmux.conf`) | Windows Terminal equivalent | Status |
 |---|---|---|
-| `new-session` + `split-window -h -p 34` | `wt new-tab ... ; split-pane -V -s 0.34 ...` | ✅ MVP |
-| pane 0 runs `claude --settings` | `wt` pane 0 `cmd /k claude --settings <file>` | ✅ MVP |
-| pane 1 runs `ccr sidecar` | `wt` pane 1 `cmd /k node bin/ccr.js sidecar` | ✅ MVP |
-| `export CCR_STATE_DIR` into panes (`set-environment`) | `cmd /k set CCR_STATE_DIR=...&& ...` per pane | ✅ MVP |
-| `touch exited` on Claude exit → sidecar "ended" state | append `&& type nul > <state>\exited` to pane 0's command | ✅ MVP |
+| `new-session` + `split-window -h -p 34` | `wt -w 0 new-tab ... ; split-pane -V -s 0.34 ...` | ✅ MVP |
+| pane 0 runs `claude --settings` | `wt` pane 0 `cmd /c claude --settings <file>` | ✅ MVP |
+| pane 1 runs `ccr sidecar` | `wt` pane 1 `cmd /c node bin/ccr.js sidecar --exit-on-end` | ✅ MVP |
+| `export CCR_STATE_DIR` into panes (`set-environment`) | `cmd /c set CCR_STATE_DIR=...&& ...` per pane | ✅ MVP |
+| `touch exited` on Claude exit → sidecar "ended" state | append `& type nul > <state>\exited` to pane 0's command | ✅ MVP |
+| `kill-session` sweep on exit | both panes `cmd /c` + `--exit-on-end`; pane 0 lingers so the sidecar collapses first (border sweeps left→right) | ✅ MVP |
 | `set -g mouse on` | Windows Terminal default (mouse select/scroll) | ✅ free |
 | `history-limit 50000` (scrollback) | Windows Terminal scrollback (configurable, large default) | ✅ free |
 | `set-clipboard on` (OSC52) | Windows Terminal native copy (Ctrl+Shift+C / mouse) | ✅ free |
 | `bind-key -n F2 send-keys '/clear' Enter` | WT fragment action `sendInput "/clear\r"` | ⏸ Phase 2 (§7) |
 | `bind-key P` save-pane-to-file | WT "export text" / no direct CLI equiv | ⏸ deferred |
-| clean re-launch (`kill-session`) | `wt` opens a fresh window; name via `--window` if reuse wanted | ✅ acceptable |
+| clean re-launch | `wt -w 0` reuses the current window (new tab); the tab self-closes on exit | ✅ MVP |
 
 ---
 
@@ -231,8 +262,6 @@ New behavior:
   manual `/clear` for the fast release.
 - **`prefix + P` save-pane-to-file.** Windows Terminal has no CLI for dumping a
   specific pane's scrollback; users can select+copy. Defer.
-- **Pane-reuse / single-window management** across repeated `ccr` invocations
-  (tmux `kill-session` parity). MVP opens a new window each time.
 - **Standalone `.exe` packaging.** Out of scope; the release ships as the npm
   tarball, same as upstream.
 
@@ -269,8 +298,9 @@ Claude Code, and Windows Terminal:
 | Risk | Mitigation |
 |---|---|
 | Windows command-line JSON quoting for `--settings` | Write a **temp settings file**, pass its path (§4.2 step 5). |
-| `wt.exe` argument parsing (`;` separator, nested quotes) | Centralize in `buildWtArgs`; cover with a unit test asserting the exact argv; prefer `cmd /k` wrappers over deep inline quoting. |
-| Per-pane env not inherited | Inject via `cmd /k set VAR=...&& ...` rather than relying on `wt` global env. |
+| `wt.exe` argument parsing (`;` separator, nested quotes) | Centralize in `buildWtArgs`; cover with a unit test asserting the exact argv; prefer `cmd /c` wrappers over deep inline quoting. |
+| Per-pane env not inherited | Inject via `cmd /c set VAR=...&& ...` rather than relying on `wt` global env. |
+| Sidecar soft-wraps in the narrow split (ConPTY `columns` unreliable) | Launcher computes the pane width and injects `CCR_SIDECAR_COLS`; sidecar clamps to `min(live columns, hint)` (§4.2 step 6, §5.2). |
 | Windows Terminal not installed (Win10) | Detect and fall back; `doctor` flags it with the `winget` install hint. |
 | NTFS has no `0700`/`0600` | Accept best-effort (upstream `ensureSecureDir` already tolerates failure); note Windows ACLs as a Phase 2 hardening item. |
 | Claude Code `--settings` semantics differ across versions | Inline-command form in a temp settings file (§5.3); re-introduce a shim only if a future version needs it. |
