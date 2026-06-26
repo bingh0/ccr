@@ -1,11 +1,16 @@
 {
   "name": "claude-code-runrate",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Claude Code run-rate — subscription burn-rate & economy for your Claude Code sessions.",
   "license": "MIT",
   "author": "Bing Ho <reps-attic-riot@duck.com>",
-  "repository": { "type": "git", "url": "git+https://github.com/bingh0/ccr.git" },
-  "bugs": { "url": "https://github.com/bingh0/ccr/issues" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bingh0/ccr.git"
+  },
+  "bugs": {
+    "url": "https://github.com/bingh0/ccr/issues"
+  },
   "homepage": "https://github.com/bingh0/ccr#readme",
   "type": "commonjs",
   "bin": {
