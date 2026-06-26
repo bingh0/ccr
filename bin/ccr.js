@@ -40,7 +40,8 @@ Examples:
 
 Options:
   -h, --help     Show this help
-  -v, --version  Show version`;
+  -v, --version  Show version
+      --mary     Enable the mary interface`;
 
 /**
  * @param {string[]} argv
@@ -58,6 +59,7 @@ function main(argv) {
         json: { type: 'boolean' },
         'state-dir': { type: 'string' },
         hint: { type: 'boolean' },
+        mary: { type: 'boolean' },
       },
     });
   } catch (err) {
@@ -68,6 +70,9 @@ function main(argv) {
   const { values, positionals } = parsed;
   if (values.version) { process.stdout.write(`${pkg.version}\n`); return 0; }
   if (values.help) { process.stdout.write(`${HELP}\n`); return 0; }
+  // The mary interface is an env toggle under the hood; surface it as a flag so
+  // in-process panels (economy/statusline/resume) pick it up for this run.
+  if (values.mary) process.env.CCR_ENABLE_MARY_INTERFACE = '1';
 
   const cmd = positionals[0];
   if (!cmd) return cmdLaunch(undefined);          // bare `ccr` → launch
