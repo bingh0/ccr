@@ -131,16 +131,22 @@ function paneCommand(stateDir, body) {
 
 /**
  * Build the argv passed to wt.exe (excluding the wt.exe path itself):
- *   new-tab --title Claude cmd /k "<pane0>" ; split-pane -H -s <frac> cmd /k "<pane1>"
+ *   -w 0 new-tab --title Claude cmd /c "<pane0>" ; split-pane -H -s <frac> cmd /c "<pane1>"
  *
- * The ";" pane separator is its own argv token (wt re-parses it). Per-pane env
- * is injected via `cmd /k set ...` rather than wt global env. After Claude
- * exits, pane 0 (unconditional `&`) drops the `exited` sentinel (so the sidecar
- * can show a clean "session ended" state) and deletes the temp settings file
- * (cleanup-after-window-closes; the file was only needed at Claude startup).
+ * `-w 0` targets the CURRENT Windows Terminal window (open a tab in the window
+ * you ran `ccr` from) instead of spawning a separate window. The ";" pane
+ * separator is its own argv token (wt re-parses it); per-pane env is injected via
+ * `cmd /c set ...` rather than wt global env.
+ *
+ * Teardown mirrors the tmux launcher's sweep (launch.sh: `… ; touch exited; …;
+ * kill-session`): both panes run under `cmd /c`, so each closes when its command
+ * ends. On Claude exit pane 0 drops the `exited` sentinel and deletes the temp
+ * settings file, then closes; the sidecar runs with `--exit-on-end` so it shows
+ * "session ended" briefly then exits, closing pane 1 — the whole tab folds back
+ * to where you started, instead of the sidecar lingering on "session ended".
  *
  * Throws if any interpolated value contains a character that would break (or, in
- * the case of %, hijack) the cmd /k payload — see isWtArgSafe. run() catches
+ * the case of %, hijack) the cmd /c payload — see isWtArgSafe. run() catches
  * this and reports a clean error instead of spawning a broken command.
  *
  * @param {{ ccCmd: string, settingsFile: string, stateDir: string,
@@ -171,12 +177,12 @@ function buildWtArgs(o) {
     stateDir,
     `${ccCmd} --settings "${settingsFile}" & type nul > "${exited}" & del /q "${settingsFile}"`,
   );
-  const pane1 = paneCommand(stateDir, `"${node}" "${ccrJs}" sidecar`);
+  const pane1 = paneCommand(stateDir, `"${node}" "${ccrJs}" sidecar --exit-on-end`);
 
   return [
-    'new-tab', '--title', 'Claude', 'cmd', '/k', pane0,
+    '-w', '0', 'new-tab', '--title', 'Claude', 'cmd', '/c', pane0,
     ';',
-    'split-pane', splitFlag, '-s', frac, 'cmd', '/k', pane1,
+    'split-pane', splitFlag, '-s', frac, 'cmd', '/c', pane1,
   ];
 }
 

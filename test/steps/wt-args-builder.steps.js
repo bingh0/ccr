@@ -44,7 +44,7 @@ module.exports = function defineWtArgsBuilderSteps(reg) {
 
   // Then
   reg.define(/^the first pane is a "new-tab" titled "Claude"$/, (w) => {
-    assert.strictEqual(w.args[0], 'new-tab');
+    assert.ok(w.args.includes('new-tab'));
     assert.ok(w.args.includes('Claude'));
   });
   reg.define(/^the first pane command sets CCR_STATE_DIR then runs `claude --settings` with the settings file$/, (w) => {
@@ -64,12 +64,18 @@ module.exports = function defineWtArgsBuilderSteps(reg) {
   reg.define(/^the second pane command sets CCR_STATE_DIR then runs node with ccrJs and "sidecar"$/, (w) => {
     const { pane1 } = panes(w.args);
     assert.match(pane1, /^set "CCR_STATE_DIR=/);
-    assert.match(pane1, /sidecar$/);
+    assert.match(pane1, /sidecar --exit-on-end$/);
   });
-  reg.define(/^each pane command is wrapped in `cmd \/k set CCR_STATE_DIR=\.\.\.&& \.\.\.`$/, (w) => {
-    const idxs = w.args.map((/** @type {string} */ t, /** @type {number} */ i) => (t === 'cmd' && w.args[i + 1] === '/k' ? i + 2 : -1)).filter((/** @type {number} */ i) => i >= 0);
-    assert.strictEqual(idxs.length, 2, 'two cmd /k panes');
+  reg.define(/^each pane command is wrapped in `cmd \/c set CCR_STATE_DIR=\.\.\.&& \.\.\.`$/, (w) => {
+    const idxs = w.args.map((/** @type {string} */ t, /** @type {number} */ i) => (t === 'cmd' && w.args[i + 1] === '/c' ? i + 2 : -1)).filter((/** @type {number} */ i) => i >= 0);
+    assert.strictEqual(idxs.length, 2, 'two cmd /c panes');
     for (const i of idxs) assert.match(w.args[i], /^set "CCR_STATE_DIR=.*"&& /);
+  });
+  reg.define(/^the args target the current window with "-w 0"$/, (w) => {
+    assert.ok(panes(w.args).targetsCurrentWindow, 'expected leading -w 0');
+  });
+  reg.define(/^the sidecar pane carries "--exit-on-end" so it sweeps closed on session end$/, (w) => {
+    assert.match(panes(w.args).pane1, /sidecar --exit-on-end$/);
   });
   reg.define(/^CCR_STATE_DIR is present in both panes' commands$/, (w) => {
     const p = panes(w.args);

@@ -110,12 +110,53 @@ function frame() {
   draw(composeFrame(STATE_DIR, { now: Date.now(), cols: process.stdout.columns }));
 }
 
-function run() {
-  frame();
-  const id = setInterval(frame, 1000);
-  const stop = () => { clearInterval(id); process.exit(0); };
-  process.on('SIGINT', stop);
-  process.on('SIGTERM', stop);
+/**
+ * The live loop. With `exitOnEnd` (the Windows launcher passes `--exit-on-end`),
+ * the sidecar shows "session ended" for a beat then closes its own pane once the
+ * `exited` sentinel appears — so a `cmd /c` pane folds away on session end rather
+ * than lingering, matching the tmux launcher's kill-session sweep. Without it
+ * (Linux/tmux, standalone `ccr sidecar`) the loop runs until signalled, exactly
+ * as before. Side effects are injectable so the end-sweep is unit-testable.
+ *
+ * @param {{ exitOnEnd?: boolean, stateDir?: string, graceMs?: number,
+ *   tick?: () => void, sentinelExists?: () => boolean,
+ *   setIntervalFn?: Function, setTimeoutFn?: Function,
+ *   clearIntervalFn?: Function, clearTimeoutFn?: Function,
+ *   exit?: () => void, onSignal?: (sig: string, handler: () => void) => void }} [opts]
+ * @returns {() => void} the stop handler (exposed for tests)
+ */
+function run(opts = {}) {
+  const stateDir = opts.stateDir || STATE_DIR;
+  const exitOnEnd = opts.exitOnEnd != null ? opts.exitOnEnd : (process.env.CCR_SIDECAR_EXIT_ON_END === '1');
+  const graceMs = opts.graceMs != null ? opts.graceMs : 1500;
+  const tick = opts.tick || frame;
+  const sentinelExists = opts.sentinelExists || (() => fs.existsSync(path.join(stateDir, 'exited')));
+  const setIntervalFn = opts.setIntervalFn || setInterval;
+  const setTimeoutFn = opts.setTimeoutFn || setTimeout;
+  const clearIntervalFn = opts.clearIntervalFn || clearInterval;
+  const clearTimeoutFn = opts.clearTimeoutFn || clearTimeout;
+  const exit = opts.exit || (() => process.exit(0));
+  const onSignal = opts.onSignal || ((sig, handler) => process.on(sig, handler));
+
+  let id = null;
+  let endTimer = null;
+  const stop = () => {
+    if (id != null) clearIntervalFn(id);
+    if (endTimer != null) clearTimeoutFn(endTimer);
+    exit();
+  };
+  const loop = () => {
+    tick();
+    // Once the session has ended, show it for a beat then sweep this pane closed.
+    if (exitOnEnd && endTimer == null && sentinelExists()) {
+      endTimer = setTimeoutFn(stop, graceMs);
+    }
+  };
+  loop();
+  id = setIntervalFn(loop, 1000);
+  onSignal('SIGINT', stop);
+  onSignal('SIGTERM', stop);
+  return stop;
 }
 
 // `updateFeed` + `composeFrame` are exported for tests (the incremental tail +

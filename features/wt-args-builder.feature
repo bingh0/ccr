@@ -25,10 +25,16 @@ Feature: Windows Terminal argv construction
     And the second pane command sets CCR_STATE_DIR then runs node with ccrJs and "sidecar"
 
   @AC9
-  Scenario: Per-pane environment is injected via cmd /k, not wt global env
+  Scenario: Per-pane environment is injected via cmd /c, not wt global env
     When I build the wt.exe args
-    Then each pane command is wrapped in `cmd /k set CCR_STATE_DIR=...&& ...`
+    Then each pane command is wrapped in `cmd /c set CCR_STATE_DIR=...&& ...`
     And CCR_STATE_DIR is present in both panes' commands
+
+  @AC9
+  Scenario: The launch reuses the current window and sweeps closed on exit
+    When I build the wt.exe args
+    Then the args target the current window with "-w 0"
+    And the sidecar pane carries "--exit-on-end" so it sweeps closed on session end
 
   @AC9
   Scenario: Pane 0 appends the exit sentinel after Claude exits

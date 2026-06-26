@@ -69,7 +69,7 @@ test('run: ccr <profile> targets the CCS state dir (@AC6)', () => {
   assert.strictEqual(code, 0);
 
   const { args } = calls.spawnWt[0];
-  assert.match(args[5], /ccs c1 --settings/);
+  assert.match(args[7], /ccs c1 --settings/);
   const stateDir = path.join('/home/me', '.ccr', 'c1');
   assert.ok(args.filter((a) => a.startsWith('set "CCR_STATE_DIR=')).every((p) => p.includes(stateDir)));
 });

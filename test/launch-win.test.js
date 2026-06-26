@@ -81,19 +81,23 @@ const baseArgsInput = {
 test('buildWtArgs: canonical two-pane argv (@AC9 @AC2)', () => {
   const a = buildWtArgs(baseArgsInput);
 
-  // Pane 0 = new-tab titled "Claude".
-  assert.strictEqual(a[0], 'new-tab');
-  assert.strictEqual(a[1], '--title');
-  assert.strictEqual(a[2], 'Claude');
-  assert.strictEqual(a[3], 'cmd');
-  assert.strictEqual(a[4], '/k');
-  const pane0 = a[5];
+  // `-w 0` targets the CURRENT Windows Terminal window (no separate window).
+  assert.strictEqual(a[0], '-w');
+  assert.strictEqual(a[1], '0');
+
+  // Pane 0 = new-tab titled "Claude", under cmd /c so the pane closes on exit.
+  assert.strictEqual(a[2], 'new-tab');
+  assert.strictEqual(a[3], '--title');
+  assert.strictEqual(a[4], 'Claude');
+  assert.strictEqual(a[5], 'cmd');
+  assert.strictEqual(a[6], '/c');
+  const pane0 = a[7];
   assert.match(pane0, /set "CCR_STATE_DIR=C:\\Users\\me\\.ccr"/);
   assert.match(pane0, /claude --settings "C:\\Temp\\ccr-settings-ab12\.json"/);
 
   // ";" is a standalone separator token.
   const sep = a.indexOf(';');
-  assert.strictEqual(a[6], ';');
+  assert.strictEqual(a[8], ';');
   assert.ok(sep > 0);
 
   // Split + size. Default side is 'right' → a vertical split (-V).
@@ -102,10 +106,11 @@ test('buildWtArgs: canonical two-pane argv (@AC9 @AC2)', () => {
   assert.strictEqual(a[sep + 3], '-s');
   assert.strictEqual(a[sep + 4], '0.34');
   assert.strictEqual(a[sep + 5], 'cmd');
-  assert.strictEqual(a[sep + 6], '/k');
+  assert.strictEqual(a[sep + 6], '/c');
   const pane1 = a[sep + 7];
   assert.match(pane1, /set "CCR_STATE_DIR=C:\\Users\\me\\.ccr"/);
-  assert.match(pane1, /"C:\\Program Files\\nodejs\\node\.exe" "C:\\repo\\bin\\ccr\.js" sidecar/);
+  // Sidecar carries --exit-on-end so its cmd /c pane sweeps closed on session end.
+  assert.match(pane1, /"C:\\Program Files\\nodejs\\node\.exe" "C:\\repo\\bin\\ccr\.js" sidecar --exit-on-end/);
 });
 
 test('sidebarSplitFlag: side → wt split flag, defaulting to right (-V)', () => {
@@ -125,23 +130,23 @@ test('buildWtArgs: sidebarSide bottom uses a horizontal split (-H)', () => {
   assert.strictEqual(a[sep + 2], '-H');
 });
 
-test('buildWtArgs: per-pane env via cmd /k, present in both panes (@AC9)', () => {
+test('buildWtArgs: per-pane env via cmd /c, present in both panes (@AC9)', () => {
   const a = buildWtArgs(baseArgsInput);
-  const cmdK = a.filter((t, i) => t === 'cmd' && a[i + 1] === '/k');
-  assert.strictEqual(cmdK.length, 2);
+  const cmdC = a.filter((t, i) => t === 'cmd' && a[i + 1] === '/c');
+  assert.strictEqual(cmdC.length, 2);
   const panes = a.filter((t) => t.startsWith('set "CCR_STATE_DIR='));
   assert.strictEqual(panes.length, 2);
 });
 
 test('buildWtArgs: pane 0 appends the exited sentinel (@AC9 @AC5)', () => {
   const a = buildWtArgs(baseArgsInput);
-  const pane0 = a[5];
+  const pane0 = a[7];
   assert.match(pane0, /& type nul > "C:\\Users\\me\\.ccr\\exited"/);
 });
 
 test('buildWtArgs: pane 0 deletes the temp settings file on exit (@AC8)', () => {
   const a = buildWtArgs(baseArgsInput);
-  const pane0 = a[5];
+  const pane0 = a[7];
   assert.match(pane0, /& del \/q "C:\\Temp\\ccr-settings-ab12\.json"/);
 });
 
@@ -155,7 +160,7 @@ test('buildWtArgs: settings passed by path, never inline JSON (@AC9 @AC8)', () =
 
 test('buildWtArgs: ccs profile command flows through pane 0 (@AC6)', () => {
   const a = buildWtArgs({ ...baseArgsInput, ccCmd: 'ccs c1' });
-  assert.match(a[5], /ccs c1 --settings /);
+  assert.match(a[7], /ccs c1 --settings /);
 });
 
 test('findWindowsTerminal: returns null when wt is absent (@AC7)', () => {

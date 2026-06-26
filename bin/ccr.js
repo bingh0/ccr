@@ -59,6 +59,7 @@ function main(argv) {
         json: { type: 'boolean' },
         'state-dir': { type: 'string' },
         hint: { type: 'boolean' },
+        'exit-on-end': { type: 'boolean' },
         mary: { type: 'boolean' },
       },
     });
@@ -80,7 +81,7 @@ function main(argv) {
     case 'economy': return cmdEconomy(!!values.json);
     case 'resume': return cmdResume(positionals[1]);
     case 'statusline': return cmdStatusline();
-    case 'sidecar': return cmdSidecar(values['state-dir'], !!values.hint);
+    case 'sidecar': return cmdSidecar(values['state-dir'], !!values.hint, !!values['exit-on-end']);
     case 'doctor': return require('../src/doctor').run();
     case 'launch': return cmdLaunch(positionals[1]);
     default: return cmdLaunch(cmd);               // anything else → treat as a CCS profile
@@ -163,14 +164,17 @@ function cmdResume(arg) {
  * `--state-dir <dir>` targets a specific session (used by the VS Code split-pane
  * one-liner, which is shell-agnostic). `--hint` reprints the VS Code split
  * instructions + re-copies the one-liner instead of running the panel.
+ * `--exit-on-end` closes the panel shortly after the session ends (the Windows
+ * Terminal launcher passes it so its `cmd /c` pane sweeps closed like tmux).
  * @param {string | undefined} stateDir
  * @param {boolean} [showHint]
+ * @param {boolean} [exitOnEnd]
  * @returns {number | undefined}
  */
-function cmdSidecar(stateDir, showHint) {
+function cmdSidecar(stateDir, showHint, exitOnEnd) {
   if (stateDir) process.env.CCR_STATE_DIR = stateDir;
   if (showHint) return require('../src/launch-vscode').hint(process.env.CCR_STATE_DIR || STATE_DIR);
-  require('../src/sidecar').run();
+  require('../src/sidecar').run({ exitOnEnd: !!exitOnEnd });
   return undefined;
 }
 

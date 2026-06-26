@@ -39,18 +39,20 @@ const append = (f, lines) => fs.appendFileSync(f, lines.map((l) => l + '\n').joi
 
 /**
  * Split the wt.exe argv into its meaningful pieces. Shape (see buildWtArgs):
- *   new-tab --title Claude cmd /k <pane0> ; split-pane <flag> -s <frac> cmd /k <pane1>
+ *   -w 0 new-tab --title Claude cmd /c <pane0> ; split-pane <flag> -s <frac> cmd /c <pane1>
  * @param {string[]} args
  */
 function panes(args) {
   const sep = args.indexOf(';');
+  const firstCmd = args.indexOf('cmd'); // pane 0's payload follows the first `cmd /c`
   return {
-    pane0: args[5],
+    pane0: args[firstCmd + 2],
     pane1: args[args.length - 1],
     splitFlag: args[sep + 2],
     frac: args[sep + 4],
-    hasNewTab: args[0] === 'new-tab',
+    hasNewTab: args.includes('new-tab'),
     hasSplit: args[sep + 1] === 'split-pane',
+    targetsCurrentWindow: args[0] === '-w' && args[1] === '0',
   };
 }
 

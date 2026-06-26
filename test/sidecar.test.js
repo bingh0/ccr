@@ -11,7 +11,51 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { composeFrame, updateFeed } = require('../src/sidecar.js');
+const { composeFrame, updateFeed, run } = require('../src/sidecar.js');
+
+// A fully-injected harness for run() so the end-of-session sweep is testable
+// without real timers, process.exit, or stdout writes.
+function runHarness(over = {}) {
+  const w = { ticks: 0, scheduled: [], cleared: { interval: 0, timeout: 0 }, exited: 0, signals: [] };
+  const deps = {
+    graceMs: 1500,
+    tick: () => { w.ticks++; },
+    sentinelExists: () => !!over.sentinel,
+    setIntervalFn: () => 'INTERVAL_ID',
+    setTimeoutFn: (cb, ms) => { w.scheduled.push({ cb, ms }); return 'TIMEOUT_ID'; },
+    clearIntervalFn: () => { w.cleared.interval++; },
+    clearTimeoutFn: () => { w.cleared.timeout++; },
+    exit: () => { w.exited++; },
+    onSignal: (sig) => { w.signals.push(sig); },
+    ...over.deps,
+    exitOnEnd: over.exitOnEnd,
+  };
+  const stop = run(deps);
+  return { w, stop };
+}
+
+test('run: --exit-on-end schedules a sweep-close once the session has ended', () => {
+  const { w } = runHarness({ exitOnEnd: true, sentinel: true });
+  assert.strictEqual(w.ticks >= 1, true, 'rendered at least once');
+  assert.strictEqual(w.scheduled.length, 1, 'one end-sweep scheduled');
+  assert.strictEqual(w.scheduled[0].ms, 1500, 'after the grace window');
+  // Firing the scheduled sweep closes the pane: clears the loop and exits.
+  w.scheduled[0].cb();
+  assert.strictEqual(w.exited, 1);
+  assert.strictEqual(w.cleared.interval, 1);
+});
+
+test('run: without --exit-on-end a session end never self-closes (tmux/standalone)', () => {
+  const { w } = runHarness({ exitOnEnd: false, sentinel: true });
+  assert.strictEqual(w.scheduled.length, 0, 'no self-close scheduled');
+  assert.strictEqual(w.exited, 0);
+  assert.deepStrictEqual(w.signals, ['SIGINT', 'SIGTERM'], 'still wired to signals');
+});
+
+test('run: --exit-on-end does NOT close while the session is still live', () => {
+  const { w } = runHarness({ exitOnEnd: true, sentinel: false });
+  assert.strictEqual(w.scheduled.length, 0, 'no sweep until the exited sentinel appears');
+});
 
 function freshStateDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'ccr-sidecar-'));
