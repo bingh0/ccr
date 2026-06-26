@@ -21,6 +21,13 @@ const defineTranscriptSteps = require('./transcripts.steps');
 const defineFeedSteps = require('./feed.steps');
 const defineResumeSteps = require('./resume.steps');
 const defineStatuslineSteps = require('./statusline.steps');
+const defineWindowsLauncherSteps = require('./windows-launcher.steps');
+const defineWtArgsBuilderSteps = require('./wt-args-builder.steps');
+const defineStatuslineInjectionSteps = require('./statusline-injection.steps');
+const defineSidecarHostingSteps = require('./sidecar-hosting.steps');
+const defineDoctorWindowsSteps = require('./doctor-windows.steps');
+const defineFallbackNoWtSteps = require('./fallback-no-wt.steps');
+const defineVscodeSidecarSteps = require('./vscode-sidecar.steps');
 
 /**
  * Feature-file basename → its step definer. A feature with no entry here runs
@@ -35,4 +42,11 @@ module.exports = {
   'feed': defineFeedSteps,
   'resume': defineResumeSteps,
   'statusline': defineStatuslineSteps,
+  'windows-launcher': defineWindowsLauncherSteps,
+  'wt-args-builder': defineWtArgsBuilderSteps,
+  'statusline-injection': defineStatuslineInjectionSteps,
+  'sidecar-hosting': defineSidecarHostingSteps,
+  'doctor-windows': defineDoctorWindowsSteps,
+  'fallback-no-wt': defineFallbackNoWtSteps,
+  'vscode-sidecar': defineVscodeSidecarSteps,
 };

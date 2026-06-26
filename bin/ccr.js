@@ -56,6 +56,8 @@ function main(argv) {
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
         json: { type: 'boolean' },
+        'state-dir': { type: 'string' },
+        hint: { type: 'boolean' },
       },
     });
   } catch (err) {
@@ -73,7 +75,7 @@ function main(argv) {
     case 'economy': return cmdEconomy(!!values.json);
     case 'resume': return cmdResume(positionals[1]);
     case 'statusline': return cmdStatusline();
-    case 'sidecar': return cmdSidecar();
+    case 'sidecar': return cmdSidecar(values['state-dir'], !!values.hint);
     case 'doctor': return require('../src/doctor').run();
     case 'launch': return cmdLaunch(positionals[1]);
     default: return cmdLaunch(cmd);               // anything else → treat as a CCS profile
@@ -151,26 +153,37 @@ function cmdResume(arg) {
   return 0;
 }
 
-/** `ccr sidecar` — live economy panel; keeps the process alive (no exit code). */
-function cmdSidecar() {
+/**
+ * `ccr sidecar` — live economy panel; keeps the process alive (no exit code).
+ * `--state-dir <dir>` targets a specific session (used by the VS Code split-pane
+ * one-liner, which is shell-agnostic). `--hint` reprints the VS Code split
+ * instructions + re-copies the one-liner instead of running the panel.
+ * @param {string | undefined} stateDir
+ * @param {boolean} [showHint]
+ * @returns {number | undefined}
+ */
+function cmdSidecar(stateDir, showHint) {
+  if (stateDir) process.env.CCR_STATE_DIR = stateDir;
+  if (showHint) return require('../src/launch-vscode').hint(process.env.CCR_STATE_DIR || STATE_DIR);
   require('../src/sidecar').run();
   return undefined;
 }
 
 /**
- * `ccr [profile]` — launch the tmux session (claude/ccs + sidebar) via launch.sh.
+ * `ccr [profile]` — launch the live sidecar. Inside VS Code's integrated terminal
+ * we split it in place (Windows always; other OSes via CCR_VSCODE=1, since tmux
+ * already works there); on native Windows we drive Windows Terminal; otherwise
+ * the tmux launcher (scripts/launch.sh).
  * @param {string | undefined} profile
  * @returns {number}
  */
 function cmdLaunch(profile) {
+  const inVscode = process.env.TERM_PROGRAM === 'vscode';
+  if (inVscode && (process.platform === 'win32' || process.env.CCR_VSCODE === '1')) {
+    return require('../src/launch-vscode').run(profile);
+  }
   if (process.platform === 'win32') {
-    process.stderr.write(
-      'ccr: the live sidebar needs tmux + bash, which native Windows lacks.\n' +
-      '     Use WSL for the sidebar, or run these directly (they work natively):\n' +
-      '       ccr economy      one-off economy panel\n' +
-      "       ccr statusline   wire into Claude Code's statusLine\n" +
-      '       ccr doctor       check your setup\n');
-    return 1;
+    return require('../src/launch-win').run(profile);
   }
   const { spawnSync } = require('node:child_process');
   const launcher = path.join(__dirname, '..', 'scripts', 'launch.sh');

@@ -51,15 +51,42 @@ npm i -g claude-code-runrate
 | `ccr economy --json` | Stable machine-readable model (scripting) | ✅ | ✅ | ✅ |
 | `ccr resume` | Recent sessions ranked by cost to resume | ✅ | ✅ | ✅ |
 | `ccr statusline` | One-line summary wired into CC's `statusLine` | ✅ | ✅ | ✅ |
-| `ccr sidecar` | Live tmux dashboard + tool/skills feed | ✅ | ✅ | ⛔ (tmux; use WSL) |
+| `ccr sidecar` | Live dashboard + tool/skills feed | ✅ tmux | ✅ tmux | ✅ Windows Terminal / VS Code |
 
-The CLI and statusline are pure Node — they run on native Windows. The rich live
-sidebar needs `tmux`, so on Windows use WSL.
+The CLI and statusline are pure Node — they run on native Windows. The live
+sidebar runs on **Windows Terminal** (`ccr` splits it automatically) or inside
+**VS Code's integrated terminal** on any OS (see [VS Code](#vs-code-split-terminal)).
+On Linux/macOS the default host is `tmux`. No WSL required.
 
 ## Requirements
 
 - **Node ≥ 18.3** — that's it for the core. **Zero runtime dependencies.**
-- `tmux` — only for the optional `ccr sidecar`.
+- For the optional live `ccr sidecar`: `tmux` on Linux/macOS, or **Windows
+  Terminal** / **VS Code's integrated terminal** on Windows (no WSL).
+
+## VS Code (split terminal)
+
+`ccr` detects VS Code's integrated terminal (`TERM_PROGRAM=vscode`) and wires the
+live sidebar into a **split pane** — no separate window, no WSL. A shell can't
+trigger the split itself, so `ccr` does everything around it:
+
+1. Run `ccr` (or `ccr <profile>`). Claude starts in the **current** pane and a
+   bright banner shows the steps. The sidecar command is **copied to your
+   clipboard** automatically (via an OSC 52 escape — works over SSH/remote too).
+2. **Split the terminal** — `Ctrl+Shift+5` (Windows/Linux) or `Cmd+\` (macOS).
+3. **Paste** into the new pane and press Enter — the live sidebar runs there.
+
+Lost the banner once Claude takes the screen? Run `ccr sidecar --hint` to reprint
+the steps and re-copy the command.
+
+On **Windows** this is the default inside VS Code (Windows Terminal otherwise
+opens a separate window, so the in-editor split is nicer). On **Linux/macOS**,
+`ccr` defaults to `tmux` (which works inside the VS Code terminal too); set
+`CCR_VSCODE=1` to use the split-terminal flow there instead.
+
+> Automating the split keystroke itself would need a VS Code extension (the `code`
+> CLI has no "run command" verb) — out of scope for the zero-dependency core. The
+> clipboard + `--hint` reduce it to split-and-paste.
 
 ## Wiring the statusline into Claude Code
 

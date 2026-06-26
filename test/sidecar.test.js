@@ -1,19 +1,98 @@
-// @ts-check
 'use strict';
-// Unit test for src/sidecar.js updateFeed — the incremental transcript tail.
-// The subtle parts: read only NEW bytes by offset, accumulate stats across
-// ticks, and reset cleanly on a session switch. Uses a real temp file because
-// readNewLines reads by byte offset.
+
+// Phase 5 — sidecar live states + sentinel round-trip, plus the updateFeed
+// incremental transcript tail (the two subtle parts of the sidecar).
+// Mirrors features/sidecar-hosting.feature (@AC3 waiting/render, @AC5 ended)
+// and the live tool/skills feed (features/feed.feature).
 
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
-const path = require('node:path');
 const os = require('node:os');
-const { updateFeed } = require('../src/sidecar');
+const path = require('node:path');
+
+const { composeFrame, updateFeed } = require('../src/sidecar.js');
+
+function freshStateDir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'ccr-sidecar-'));
+}
+
+const SAMPLE = JSON.stringify({
+  model: { display_name: 'Opus 4.8' },
+  context_window: { context_window_size: 1000000, total_input_tokens: 262000 },
+  rate_limits: {
+    five_hour: { used_percentage: 50, resets_at: Math.floor(Date.now() / 1000) + 16800 },
+    seven_day: { used_percentage: 40, resets_at: Math.floor(Date.now() / 1000) + 500000 },
+  },
+  cost: { total_cost_usd: 4.2 },
+});
+
+test('sidecar waits before the first status tick (@AC3)', () => {
+  const dir = freshStateDir();
+  try {
+    assert.match(composeFrame(dir), /waiting for the first status tick/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('sidecar renders the economy panel once a snapshot exists (@AC3)', () => {
+  const dir = freshStateDir();
+  try {
+    fs.writeFileSync(path.join(dir, 'last-status.json'), SAMPLE);
+    const frame = composeFrame(dir, { now: 1_000_000 });
+    assert.ok(!/waiting/.test(frame), 'no longer waiting');
+    assert.match(frame, /Opus 4\.8/);
+    // Block glyphs used by the economy bars render (proves it is the panel).
+    assert.ok(/[▓░]/.test(frame), 'panel block glyphs present');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('sidecar shows "session ended" when the sentinel is present (@AC5)', () => {
+  const dir = freshStateDir();
+  try {
+    fs.writeFileSync(path.join(dir, 'last-status.json'), SAMPLE);
+    fs.writeFileSync(path.join(dir, 'exited'), '');
+    assert.match(composeFrame(dir), /session ended/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('sentinel round-trip: live panel -> drop sentinel -> ended (@AC5)', () => {
+  const dir = freshStateDir();
+  try {
+    fs.writeFileSync(path.join(dir, 'last-status.json'), SAMPLE);
+    assert.match(composeFrame(dir, { now: 1_000_000 }), /Opus 4\.8/);
+
+    // Pane 0 drops the sentinel on Claude exit (see buildWtArgs `type nul`).
+    fs.writeFileSync(path.join(dir, 'exited'), '');
+    assert.match(composeFrame(dir), /session ended/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('sidecar reports unreadable status instead of crashing', () => {
+  const dir = freshStateDir();
+  try {
+    fs.writeFileSync(path.join(dir, 'last-status.json'), '{not json');
+    assert.match(composeFrame(dir), /status unreadable/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- updateFeed: the incremental transcript tail --------------------------
+// The subtle parts: read only NEW bytes by offset, accumulate stats across
+// ticks, and reset cleanly on a session switch. Uses a real temp file because
+// readNewLines reads by byte offset. (Restored from the pre-Windows-branch
+// suite — these regressed to zero coverage when composeFrame tests landed.)
 
 let SEQ = 0;
-const tmpFile = () => path.join(os.tmpdir(), `ccr-sidecar-${process.pid}-${++SEQ}.jsonl`);
+const tmpFile = () => path.join(os.tmpdir(), `ccr-feed-${process.pid}-${++SEQ}.jsonl`);
 
 function toolLine(name, input) {
   return JSON.stringify({
@@ -22,10 +101,9 @@ function toolLine(name, input) {
     message: { model: 'claude-opus-4-8', content: [{ type: 'tool_use', name, input }] },
   });
 }
-const append = (/** @type {string} */ f, /** @type {string[]} */ lines) =>
-  fs.appendFileSync(f, lines.map((l) => l + '\n').join(''));
+const append = (f, lines) => fs.appendFileSync(f, lines.map((l) => l + '\n').join(''));
 
-test('accumulates tool events incrementally and only reads new bytes', () => {
+test('updateFeed accumulates tool events incrementally and only reads new bytes', () => {
   const f = tmpFile();
   append(f, [toolLine('Edit', { file_path: 'src/a.js' }), toolLine('Bash', { description: 'run tests' })]);
 
@@ -50,7 +128,7 @@ test('accumulates tool events incrementally and only reads new bytes', () => {
   fs.unlinkSync(f);
 });
 
-test('resets cleanly on a session switch (new transcript path)', () => {
+test('updateFeed resets cleanly on a session switch (new transcript path)', () => {
   const a = tmpFile();
   const b = tmpFile();
   append(a, [toolLine('Read', { file_path: 'x.js' }), toolLine('Read', { file_path: 'y.js' })]);
@@ -67,7 +145,7 @@ test('resets cleanly on a session switch (new transcript path)', () => {
   fs.unlinkSync(b);
 });
 
-test('restarts from 0 if the file shrank (rotation/truncation)', () => {
+test('updateFeed restarts from 0 if the file shrank (rotation/truncation)', () => {
   const f = tmpFile();
   append(f, [toolLine('Edit', { file_path: 'a.js' }), toolLine('Edit', { file_path: 'b.js' })]);
   updateFeed(f);
