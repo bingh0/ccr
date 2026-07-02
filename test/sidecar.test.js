@@ -129,6 +129,34 @@ test('sidecar reports unreadable status instead of crashing', () => {
   }
 });
 
+test('sidecar annotates a stale snapshot instead of silently freezing (features/liveness.feature)', () => {
+  const dir = freshStateDir();
+  try {
+    const snap = path.join(dir, 'last-status.json');
+    fs.writeFileSync(snap, SAMPLE);
+    const now = Date.now();
+    // CC stopped emitting the status line ~8 min ago (long op / idle) — age the file.
+    const eightMinAgoSec = now / 1000 - 8 * 60;
+    fs.utimesSync(snap, eightMinAgoSec, eightMinAgoSec);
+    const frame = composeFrame(dir, { now });
+    assert.match(frame, /updated 8m ago/, 'stale snapshot is annotated, not silently frozen');
+    assert.match(frame, /Opus 4\.8/, 'dashboard stays visible — the marker is never a wipe');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('sidecar shows no staleness marker while the snapshot is fresh', () => {
+  const dir = freshStateDir();
+  try {
+    fs.writeFileSync(path.join(dir, 'last-status.json'), SAMPLE);
+    const frame = composeFrame(dir, { now: Date.now() });
+    assert.ok(!/updated \d+m ago/.test(frame), 'a just-written snapshot carries no marker');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // --- updateFeed: the incremental transcript tail --------------------------
 // The subtle parts: read only NEW bytes by offset, accumulate stats across
 // ticks, and reset cleanly on a session switch. Uses a real temp file because

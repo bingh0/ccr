@@ -59,7 +59,17 @@ function tok(/** @type {number|null} */ n) {
 function fmtMins(/** @type {number|null} */ m) {
   if (m == null || !isFinite(m)) return '?';
   m = Math.max(0, Math.round(m));
-  if (m >= 1440) { const d = Math.floor(m / 1440), hh = Math.floor((m % 1440) / 60); return hh ? `${d}d${hh}h` : `${d}d`; }
+  if (m >= 1440) {
+    const d = Math.floor(m / 1440), hh = Math.floor((m % 1440) / 60);
+    // A 100+ day horizon is a near-zero-burn artifact (100−used%)/rate with a
+    // tiny rate). Its hours are noise, and a wide value like "1000d5h" would
+    // overflow the sidebar's fixed 7-col time column and shove the meter bar out
+    // of vertical line with the sibling row (the 5h/weekly bars must align). Cap
+    // it so the string never exceeds 6 visible columns — compact and honest.
+    if (d >= 1000) return '>999d';
+    if (d >= 100) return `${d}d`;
+    return hh ? `${d}d${hh}h` : `${d}d`;
+  }
   const h = Math.floor(m / 60), r = m % 60;
   if (h >= 1) return r ? `${h}h${String(r).padStart(2, '0')}m` : `${h}h`;
   return `${m}m`;

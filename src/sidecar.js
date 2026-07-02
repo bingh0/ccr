@@ -12,6 +12,7 @@ const { normalizeStatus } = require('./normalize');
 const { renderEconomy } = require('./render/economy');
 const { renderFeed } = require('./render/feed');
 const { clampVisible } = require('./render/shared');
+const { liveness } = require('./liveness');
 const { currentTranscriptPath, readNewLines, parseEvents } = require('./transcripts');
 
 const STATE_DIR = process.env.CCR_STATE_DIR || path.join(os.homedir(), '.ccr');
@@ -102,6 +103,16 @@ function composeFrame(stateDir, opts = {}) {
       if (feedStr) out += '\n\n' + feedStr;
     }
   } catch { /* feed is optional */ }
+  // Staleness annotation (never a wipe): Claude Code does not emit the status line
+  // during a single long operation, so the snapshot legitimately ages. Surface a
+  // quiet "updated Nm ago" so a stale panel reads as stale rather than broken —
+  // otherwise a long agent run (or a CC statusLine that stopped firing) looks like
+  // the sidecar just froze. See src/liveness.js + features/liveness.feature.
+  try {
+    const ageMs = now - fs.statSync(snapshot).mtimeMs;
+    const mark = liveness({ exited: false, ageMs }).marker;
+    if (mark) out += (out.endsWith('\n') ? '' : '\n') + '  ' + dim('· ' + mark);
+  } catch { /* snapshot mtime unknown → no marker */ }
   return clamp(out.endsWith('\n') ? out : out + '\n');
 }
 
