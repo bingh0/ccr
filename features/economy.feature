@@ -45,6 +45,15 @@ Feature: Economy screen readability and intuitiveness
     And the context meter appears exactly once
     And the weekly window meter appears exactly once
 
+  # --- Meter bars stay in one column regardless of the horizon magnitude ---
+
+  Scenario: A barely-used window keeps its meter bar aligned with the others
+    # A near-zero burn rate makes time-to-exhaust explode (e.g. "665d"); that
+    # figure must not overflow its column and shove the meter out of line.
+    Given the weekly window is 1% used and resets in 6h40m
+    When the economy screen renders
+    Then the 5h and weekly meter bars start in the same column
+
   # --- Used vs remaining are labelled (R3) ---
 
   Scenario Outline: Percentage meters are labelled as "used"

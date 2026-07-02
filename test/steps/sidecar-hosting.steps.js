@@ -51,6 +51,25 @@ module.exports = function defineSidecarHostingSteps(reg) {
     fs.unlinkSync(w.tpath);
   });
 
+  // Staleness annotation (snapshot ages while CC is busy) — driven through the
+  // real composeFrame so it pins the wiring, not just the pure liveness() policy.
+  reg.define(/^Claude wrote a snapshot (\d+) minutes ago and then went quiet$/, (w, n) => {
+    w.dir = freshDir();
+    const snap = path.join(w.dir, 'last-status.json');
+    fs.writeFileSync(snap, SAMPLE);
+    w.now = Date.now();
+    const agoSec = w.now / 1000 - Number(n) * 60;   // age the file's mtime
+    fs.utimesSync(snap, agoSec, agoSec);
+  });
+  reg.define(/^the sidecar redraws after the quiet spell$/, (w) => {
+    w.frame = composeFrame(w.dir, { now: w.now });
+  });
+  reg.define(/^the economy panel is still shown with a dim "updated (\d+)m ago" marker$/, (w, n) => {
+    assert.match(w.frame, /Opus 4\.8/, 'dashboard stays visible — the marker is never a wipe');
+    assert.match(w.frame, new RegExp('updated ' + n + 'm ago'));
+    fs.rmSync(w.dir, { recursive: true, force: true });
+  });
+
   // Ended (sentinel round-trip)
   reg.define(/^the sidecar is rendering the live panel$/, (w) => {
     w.dir = freshDir();

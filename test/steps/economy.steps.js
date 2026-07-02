@@ -103,6 +103,14 @@ module.exports = function defineEconomySteps(reg) {
     assert.strictEqual(w.meterLines.filter((/** @type {string} */ l) => /\bweekly\b/.test(l)).length, 1);
   });
 
+  // --- Meter-bar alignment (regression: a huge time-to-exhaust shifted a bar) ---
+  reg.define(/^the 5h and weekly meter bars start in the same column$/, (w) => {
+    const barCol = (/** @type {string} */ label) => meterRow(w, label).search(/[▓░]/);
+    const c5 = barCol('5h'), cw = barCol('weekly');
+    assert.ok(c5 >= 0 && cw >= 0, 'both the 5h and weekly meter rows are present');
+    assert.strictEqual(c5, cw, `5h bar @${c5} must align with weekly bar @${cw}`);
+  });
+
   // --- Used vs left labels ---
   reg.define(/^the "([^"]+)" line is labelled as used, not left$/, (w, meter) => {
     const row = meterRow(w, meter);

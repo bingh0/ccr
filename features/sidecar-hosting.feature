@@ -27,6 +27,14 @@ Feature: Live sidecar hosting
     When the sidecar tails the transcript
     Then the tool/skills feed updates roughly once a second
 
+  @AC3
+  Scenario: A quiet spell annotates the panel instead of freezing it
+    # CC does not emit the status line during a long single operation, so the
+    # snapshot legitimately ages — the panel must say so, not look dead.
+    Given Claude wrote a snapshot 8 minutes ago and then went quiet
+    When the sidecar redraws after the quiet spell
+    Then the economy panel is still shown with a dim "updated 8m ago" marker
+
   @AC5
   Scenario: Exiting Claude flips the sidecar to a session-ended state
     Given the sidecar is rendering the live panel
