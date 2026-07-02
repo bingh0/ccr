@@ -1,6 +1,6 @@
 {
   "name": "claude-code-runrate",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Claude Code run-rate — subscription burn-rate & economy for your Claude Code sessions.",
   "license": "MIT",
   "author": "Bing Ho <reps-attic-riot@duck.com>",
