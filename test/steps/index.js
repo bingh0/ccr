@@ -28,6 +28,7 @@ const defineSidecarHostingSteps = require('./sidecar-hosting.steps');
 const defineDoctorWindowsSteps = require('./doctor-windows.steps');
 const defineFallbackNoWtSteps = require('./fallback-no-wt.steps');
 const defineVscodeSidecarSteps = require('./vscode-sidecar.steps');
+const defineAccountLimitsSteps = require('./account-limits.steps');
 
 /**
  * Feature-file basename → its step definer. A feature with no entry here runs
@@ -49,4 +50,5 @@ module.exports = {
   'doctor-windows': defineDoctorWindowsSteps,
   'fallback-no-wt': defineFallbackNoWtSteps,
   'vscode-sidecar': defineVscodeSidecarSteps,
+  'account-limits': defineAccountLimitsSteps,
 };

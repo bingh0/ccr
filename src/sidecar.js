@@ -9,6 +9,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { normalizeStatus } = require('./normalize');
+const { freshenAccountLimits } = require('./account-limits');
 const { renderEconomy } = require('./render/economy');
 const { renderFeed } = require('./render/feed');
 const { clampVisible } = require('./render/shared');
@@ -88,7 +89,12 @@ function composeFrame(stateDir, opts = {}) {
   try { state = JSON.parse(raw); } catch { return clamp(dim('ccr · status unreadable') + '\n'); }
   let out;
   try {
-    out = renderEconomy(normalizeStatus(state), { tick: Math.floor(now / 1000) % 2 === 0 });
+    // 5h/weekly are ACCOUNT-WIDE but captured per-profile, so an idle sibling's
+    // panel lags a busy one. Reconcile the meters against sibling profiles on the
+    // SAME account (see src/account-limits.js) before rendering — best-effort, and
+    // strictly guarded so a different account is never mixed in.
+    const reconciled = { ...state, rate_limits: freshenAccountLimits(state.rate_limits, stateDir) };
+    out = renderEconomy(normalizeStatus(reconciled), { tick: Math.floor(now / 1000) % 2 === 0 });
   } catch (e) {
     out = dim('ccr render error: ' + (e && e instanceof Error ? e.message : String(e)));
   }
