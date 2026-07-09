@@ -3,15 +3,15 @@
 A **targeted** tool: it runs Gherkin (`.feature`) acceptance tests in plain
 JavaScript with **zero npm dependencies and no build step**, on top of Node's
 built-in `node:test`. In ccr it executes the criteria in
-[`features/`](../features/). At **~250 lines** (≈200 of code, the rest its doc
-header) it's one of the smallest practical Gherkin runners you'll find — small
-enough to read in one sitting.
+[`features/`](../features/). At ~520 lines (a third of which is documentation)
+it's one of the smallest practical Gherkin runners you'll find — small enough
+to read in one sitting, and small enough to vendor as a single file.
 
 It exists because the alternative — pulling in `@cucumber/gherkin` + a Vitest/Jest
 binding — would add a dependency tree and a build step to a tool whose whole
 selling point is that `npx claude-code-runrate` installs instantly on every OS,
-Windows included. So we implement exactly the slice of Gherkin the feature files
-use, and **refuse the rest loudly** instead of pretending to support it.
+Windows included. So we implement exactly the practical core of Gherkin and
+**refuse the rest loudly** instead of pretending to support it.
 
 ## When to reach for it — and when not
 
@@ -22,7 +22,8 @@ This is a **targeted** option, not a general Cucumber replacement. It fits when
   build step**;
 - running on Node's built-in `node:test` is fine; and
 - the practical core of Gherkin (Feature / Background / Scenario / Scenario
-  Outline + Examples) covers your `.feature` files.
+  Outline + Examples / step data tables / `@skip` `@todo` `@only` tags) covers
+  your `.feature` files.
 
 That's the whole niche: the smallest thing that turns `.feature` files into real
 `node:test` tests, with nothing to install and nothing to compile.
@@ -32,12 +33,10 @@ Once you outgrow that, reach for a heavier tool instead:
 - **TypeScript on a Vite / Vitest stack →**
   [`@amiceli/vitest-cucumber`](https://github.com/amiceli/vitest-cucumber). Native
   TypeScript, integrates with the Vitest runner (watch, UI, coverage), and
-  supports Cucumber Expressions, tags, hooks, data tables and doc strings. If
-  you're already on Vitest, use it — you have a toolchain and a build step, so the
-  zero-dep / no-build trade this parser makes buys you nothing.
+  supports Cucumber Expressions, hooks and doc strings.
 - **The full Gherkin grammar or the official toolchain →**
   [`@cucumber/gherkin`](https://github.com/cucumber/gherkin) with a
-  Jest / Mocha / Vitest binding.
+  Jest / Mocha / Vitest binding, or `@cucumber/cucumber` itself.
 
 ## The design rule
 
@@ -45,9 +44,52 @@ Once you outgrow that, reach for a heavier tool instead:
 > `file:line:` error. **Never parse a feature file vacuously.**
 
 The failure mode that matters for a small parser isn't crashing — it's *silently
-under-parsing*, so a scenario passes with fewer steps than the author wrote (a
-false green). Every construct below that this parser doesn't support is therefore
-turned into a hard `GherkinSyntaxError`, not ignored.
+under-parsing*, so a scenario passes with fewer steps (or fewer table cells)
+than the author wrote — a false green. Every construct below that this parser
+doesn't support is therefore turned into a hard `GherkinSyntaxError`, not
+ignored. The same rule extends past the parser: unbound and ambiguous steps are
+failed by `runFeatures()`'s guard tests, and generated step snippets **throw**
+rather than pass.
+
+## Usage
+
+The high-level entry point runs a whole directory, one scoped registry per
+feature:
+
+```js
+// test/features.test.js
+const path = require('node:path');
+const { runFeatures } = require('./gherkin');
+
+runFeatures(path.join(__dirname, '..', 'features'), {
+  // feature basename → step definer
+  'counter': (reg) => {
+    reg.define(/^a counter at (\d+)$/,   (w, n) => { w.count = Number(n); });
+    reg.define(/^I add (\d+)$/,          (w, n) => { w.count += Number(n); });
+    reg.define(/^the counter is (\d+)$/, (w, n) => {
+      require('node:assert').strictEqual(w.count, Number(n));
+    });
+  },
+}, { wip: [] });   // features still bootstrapping (TODO scenarios allowed)
+```
+
+Run with `node --test`. Alongside the scenarios, `runFeatures` registers guards:
+
+- **every definer key must name an existing `.feature` file** — a renamed
+  feature can't silently strand its step definitions;
+- **within each feature, every step must match exactly one definition** — an
+  ambiguous step (>1 match) fails, and an unbound step (0 matches) fails
+  *unless the feature is listed in `wip`*. This matters because unbound
+  scenarios register as `node:test` **TODO**, which is reported as *passing* —
+  without the guard, rewording one step could silently un-test a feature while
+  CI stays green. The failure message includes a **paste-ready snippet** for
+  each missing step;
+- `@skip`'d scenarios are ratcheted too: skip means "don't run", never
+  "don't bind".
+
+Step registries are **scoped per feature**: one feature's patterns can never
+match another feature's steps, so there is no global step namespace — identical
+sentences in two features may legitimately bind to different definitions.
 
 ## Supported grammar
 
@@ -58,15 +100,78 @@ turned into a hard `GherkinSyntaxError`, not ignored.
 | `Scenario:` | free-text title |
 | `Scenario Outline:` | requires exactly one `Examples:` table |
 | `Examples:` | a header row then ≥1 data row, `\|`-delimited |
-| `<placeholder>` | substituted from the Examples columns; every `<name>` must match a column |
+| `<placeholder>` | substituted from the Examples columns — in step text **and** in step data tables; every `<name>` must match a column |
 | Steps | `Given` `When` `Then` `And` `But` `*`, followed by step text |
+| Step data tables | `\|` rows after a step attach to that step; the step function receives a **`DataTable`** as its last argument |
+| Tags | `@skip` / `@todo` / `@only` map to the `node:test` options of the same name; tags on `Feature:` apply to all its scenarios; any other tag (e.g. `@AC3`) is carried on `scenario.tags` but has no runtime effect |
 | `# comment` | ignored anywhere |
-| `@tag` | ignored (no tag filtering) |
 | Feature narrative | the `As a… / I want… / So that…` prose block is ignored |
+
+Table cells honor the Gherkin escapes `\|` (literal pipe), `\\` (literal
+backslash) and `\n` (newline); a backslash before any other character is
+literal, so cells like `C:\Temp` or `Cmd+\` need no escaping.
+
+Tag semantics on the runner side: `@skip` never executes the scenario;
+`@todo` executes it but its failures don't fail the run (`node:test` TODO
+semantics); `@only` is honored when Node is started with `--test-only`,
+otherwise it has no effect.
+
+### Step matching and `DataTable`
 
 Step matching is by **`RegExp` or exact string** (capture groups become step
 arguments) — see `StepRegistry.define`. There are no Cucumber Expressions
-(`{int}`, `{string}`, custom parameter types); use a real regex instead.
+(`{int}`, `{string}`); write a regex.
+
+A step with a data table receives a `DataTable` as its **last** argument,
+API-compatible with cucumber-js so step code ports both ways:
+
+```gherkin
+Given these users
+  | name  | role  |
+  | ada   | admin |
+```
+
+```js
+reg.define(/^these users$/, (w, table) => {
+  table.raw();      // [['name','role'],['ada','admin']]  (defensive copy)
+  table.rows();     // rows minus the header
+  table.hashes();   // [{ name: 'ada', role: 'admin' }]
+  table.rowsHash(); // two-column table → { key: value } map
+  table.transpose() // columns become rows → new DataTable
+});
+```
+
+### Scenario-scoped cleanup: `world.defer(fn)`
+
+Cleanup registered with `world.defer` runs after the scenario in reverse (LIFO)
+order — **including when a step failed**, so a failing assertion can't leak
+temp dirs, files, or processes. The step failure, if any, outranks cleanup
+errors; if the steps passed, the first cleanup error fails the scenario.
+(`defer` is a reserved key on the world object.)
+
+```js
+reg.define(/^a state dir$/, (w) => {
+  w.dir = fs.mkdtempSync(prefix);
+  w.defer(() => fs.rmSync(w.dir, { recursive: true, force: true }));
+});
+```
+
+### Snippets for unbound steps
+
+Guard failures (and `executeSteps`' undefined-step error) include a paste-ready
+definition per missing step — quoted strings and numbers already converted to
+capture groups:
+
+```
+// the meter moved from 40% to 50.5%
+reg.define(/^the meter moved from (\d+)% to ([\d.]+)%$/, (w, p1, p2) => {
+  throw new Error('pending: implement this step');
+});
+```
+
+The generated body **throws** deliberately: an empty body would turn the pasted
+definition into an instant vacuous pass — the exact failure mode this harness
+exists to prevent.
 
 ## Deliberately unsupported — and rejected loudly
 
@@ -75,13 +180,16 @@ Each of these throws `GherkinSyntaxError` with the offending line number:
 | Rejected | Why it's rejected, not ignored |
 |---|---|
 | Doc strings (`"""` / ` ``` `) | would be mis-read line-by-line as steps |
-| Step-level data tables | the table argument would be silently dropped |
 | Multiple `Examples:` per Outline | the 2nd header row would corrupt the expansion |
 | `Examples:` with no data rows / no header | would expand to zero (vacuous) scenarios |
-| Ragged Examples rows (cell count ≠ header) | column misalignment would pass silently |
+| Ragged table rows (Examples **or** step tables) | column misalignment would pass silently |
+| A table row missing its closing `\|` | the trailing cell would be silently dropped |
+| A table row with no preceding step | the data would silently belong to nothing |
 | Unknown `<placeholder>` | almost always a typo; would leak `<name>` into a step |
 | A `Scenario`/`Scenario Outline` with no steps | would run zero assertions and pass vacuously |
 | A step *after* its `Examples:` table | malformed ordering; the step would mis-attach |
+| Tags anywhere but immediately before `Feature:` / `Scenario:` / `Scenario Outline:` | a mis-placed `@skip` would silently not skip |
+| A near-miss semantic tag (`@Skip`, `@SKIP`, `@Only`, …) | would be silently inert — worst for `@only`, where the typo silently *deselects* the scenario under `--test-only` |
 | `Rule:` (Gherkin 6) | grouping would be silently flattened |
 | A step before any `Scenario`/`Background` | would be silently discarded |
 | A 2nd `Feature:` / `Background:`, or `Background:` after a `Scenario` | ambiguous scope |
@@ -90,9 +198,6 @@ If you genuinely need any of these, this isn't the right parser — reach for
 [`@cucumber/gherkin`](https://github.com/cucumber/gherkin).
 
 ### Two non-features, by design (not loud errors)
-
-These aren't detected and rejected with a dedicated message — they simply aren't
-implemented, and that's a deliberate choice, not an oversight:
 
 - **Cucumber Expressions** (`{int}`, `{string}`, custom parameter types). Step
   text is matched by `RegExp`/exact string in `StepRegistry` — write a regex;
@@ -121,41 +226,27 @@ try {
 }
 ```
 
-Undefined steps are *not* a parse error — they're reported by the runner as
-node:test **TODO** entries, so feature files are runnable before their steps
-exist and go green as steps land.
-
-## Usage
-
-```js
-const { StepRegistry, runFeatureFile } = require('./test/gherkin');
-
-const registry = new StepRegistry();
-registry
-  .define(/^a counter at (\d+)$/, (world, n) => { world.count = Number(n); })
-  .define(/^I add (\d+)$/,        (world, n) => { world.count += Number(n); })
-  .define(/^the counter is (\d+)$/, (world, n) => {
-    require('node:assert').strictEqual(world.count, Number(n));
-  });
-
-runFeatureFile('features/counter.feature', registry); // registers a node:test per scenario
-```
-
-In this repo the wiring lives in [`test/features.test.js`](../test/features.test.js):
-every `features/*.feature` is auto-discovered and run against its **own scoped
-registry** (`test/steps/`), so step patterns never leak between features, and
-intra-feature ambiguity is asserted against.
+Undefined steps are *not* a parse error — they're reported by the low-level
+runner as node:test **TODO** entries, so feature files are runnable before their
+steps exist and go green as steps land. Under `runFeatures()` that bootstrapping
+mode must be opted into per feature via `wip`; otherwise unbound steps fail the
+guard test (TODO reads as *passing* in `node:test`, so an unguarded TODO is a
+silent coverage hole).
 
 ## Public API
 
 | Export | Purpose |
 |---|---|
+| `runFeatures(dir, definers, { wip }?)` | **high-level runner**: discover every `.feature`, scoped registries, guard tests |
 | `parseFeature(text, filename?)` | parse → `{ feature, background, scenarios }`; throws `GherkinSyntaxError` |
 | `StepRegistry` | `.define(pattern, fn)` / `.find(text)` |
-| `executeSteps(steps, registry, world?)` | run a flat step list against a shared world |
-| `runFeature(parsed, registry)` | register a `node:test` per scenario |
+| `executeSteps(steps, registry, world?)` | run a flat step list against a shared world (installs `world.defer`) |
+| `runFeature(parsed, registry)` | register a `node:test` per scenario (tags mapped, unbound → TODO) |
 | `runFeatureFile(file, registry)` | read + parse + run a `.feature` file |
+| `DataTable` | cucumber-compatible step table: `raw` / `rows` / `hashes` / `rowsHash` / `transpose` |
+| `buildSnippet(text)` | paste-ready step definition for an unbound step (body throws) |
 | `GherkinSyntaxError` | thrown on unsupported/malformed syntax; carries `.line` |
 
 The whole thing is covered by [`test/harness.test.js`](../test/harness.test.js),
-including a rejection test for every guard above.
+including a rejection test for every guard above, a self-proving `@skip`
+scenario whose only step throws, and an eval of a generated snippet.

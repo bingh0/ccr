@@ -1,8 +1,9 @@
 # Acceptance criteria for the one-line status bar summary (src/render/statusline.js).
 # This is what Claude Code actually invokes via statusLine; it must be plain text
 # (no ANSI), name the binding window, and degrade on API sessions.
-# Steps drive the real renderer with a normalized view. Phrasings are distinct
-# from the economy feature's so the two don't collide in the shared step registry.
+# Steps drive the real renderer with a normalized view. (Phrasings are kept
+# distinct from the economy feature's for readers; collisions are impossible
+# anyway — step registries are scoped per feature, see test/steps/index.js.)
 
 Feature: Status-line one-line summary
   As a Claude Code user with ccr wired into the status bar

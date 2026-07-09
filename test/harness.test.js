@@ -6,7 +6,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { parseFeature, StepRegistry, executeSteps, GherkinSyntaxError } = require('./gherkin');
+const { parseFeature, StepRegistry, executeSteps, runFeature, DataTable, buildSnippet, GherkinSyntaxError } = require('./gherkin');
 
 const SAMPLE = `
 Feature: Demo
@@ -95,8 +95,26 @@ const feat = (body) => `Feature: T\n${body}\n`;
 const REJECTED = [
   ['doc strings',
     'Scenario: s\n  Given a payload\n  """\n  body\n  """', /doc strings/],
-  ['step-level data tables',
-    'Scenario: s\n  Given a table\n    | a | b |\n    | 1 | 2 |', /step-level data tables/],
+  ['a ragged step data table',
+    'Scenario: s\n  Given a table\n    | a | b |\n    | 1 |', /table row has 1 cell/],
+  ['a table row with no preceding step',
+    'Scenario: s\n  | a |\n  Given x', /table row without a preceding step/],
+  ['a table row before any scenario',
+    '| a |', /table row before any Scenario or Background/],
+  ['a table row missing its closing pipe (silent cell loss)',
+    'Scenario: s\n  Given a table\n    | a | b', /must end with a closing \|/],
+  ['an empty table row',
+    'Scenario: s\n  Given a table\n    |', /empty table row/],
+  ['tags on a step',
+    'Scenario: s\n  @late\n  Given x', /must immediately precede/],
+  ['tags on an Examples: block',
+    'Scenario Outline: o\n  Given <a>\n  @t\n  Examples:\n    | a |\n    | 1 |', /must immediately precede/],
+  ['dangling tags at end of file',
+    'Scenario: s\n  Given x\n@dangling', /dangling tags/],
+  ['a near-miss semantic tag (case typo)',
+    '@Skip\nScenario: s\n  Given x', /near-miss tag is silently inert/],
+  ['a near-miss @only (would silently deselect under --test-only)',
+    '@ONLY\nScenario: s\n  Given x', /near-miss tag is silently inert/],
   ['the Rule: keyword',
     'Rule: r\n  Scenario: s\n    Given x', /Rule: keyword/],
   ['Examples outside an outline',
@@ -151,4 +169,121 @@ test('parseFeature still accepts the supported subset unchanged', () => {
   // The valid SAMPLE above must parse without throwing under strict mode.
   const p = parseFeature(SAMPLE, 'sample.feature');
   assert.strictEqual(p.scenarios.length, 3);
+});
+
+// --- Step data tables ---------------------------------------------------------
+
+const TABLE_SAMPLE = `
+Feature: T
+  Scenario: s
+    Given these users
+      | name  | role  |
+      | ada   | admin |
+      | linus | dev   |
+    Then ok
+`;
+
+test('a table after a step attaches to it and arrives as a DataTable last argument', async () => {
+  const p = parseFeature(TABLE_SAMPLE);
+  assert.deepStrictEqual(p.scenarios[0].steps[0].table,
+    [['name', 'role'], ['ada', 'admin'], ['linus', 'dev']]);
+
+  const reg = new StepRegistry();
+  /** @type {any} */ let got = null;
+  reg.define(/^these users$/, (w, table) => { got = table; });
+  reg.define('ok', () => {});
+  await executeSteps(p.scenarios[0].steps, reg);
+
+  assert.ok(got instanceof DataTable);
+  assert.deepStrictEqual(got.hashes(), [{ name: 'ada', role: 'admin' }, { name: 'linus', role: 'dev' }]);
+  assert.deepStrictEqual(got.rows(), [['ada', 'admin'], ['linus', 'dev']]);
+  assert.deepStrictEqual(got.transpose().raw()[0], ['name', 'ada', 'linus']);
+});
+
+test('rowsHash maps a two-column table and rejects wider ones', () => {
+  assert.deepStrictEqual(new DataTable([['a', '1'], ['b', '2']]).rowsHash(), { a: '1', b: '2' });
+  assert.throws(() => new DataTable([['a', '1', 'x']]).rowsHash(), /two columns/);
+});
+
+test('Outline placeholders substitute inside step data tables', () => {
+  const p = parseFeature(feat(
+    'Scenario Outline: o\n  Given a load of <n>\n    | value |\n    | <n>   |\n  Examples:\n    | n |\n    | 7 |'));
+  assert.deepStrictEqual(p.scenarios[0].steps[0].table, [['value'], ['7']]);
+});
+
+test('table cells honor \\| \\\\ \\n escapes; other backslashes stay literal', () => {
+  const src = String.raw`Feature: T
+  Scenario: s
+    Given t
+      | a\|b | c\\d | e\nf | Cmd+\ |
+    Then ok`;
+  const p = parseFeature(src);
+  assert.deepStrictEqual(p.scenarios[0].steps[0].table, [['a|b', 'c\\d', 'e\nf', 'Cmd+\\']]);
+});
+
+// --- Tags -----------------------------------------------------------------------
+
+test('tags attach to scenarios and inherit from the Feature', () => {
+  const p = parseFeature('@suite\nFeature: T\n  @skip @AC1\n  Scenario: s\n    Given x\n');
+  assert.deepStrictEqual(p.scenarios[0].tags, ['@suite', '@skip', '@AC1']);
+});
+
+// Self-proving @skip: this registers a real node:test whose only step THROWS.
+// If the @skip → { skip: true } mapping ever breaks, this suite fails.
+{
+  const reg = new StepRegistry();
+  reg.define('boom', () => { throw new Error('@skip mapping broken: skipped step ran'); });
+  runFeature(parseFeature('Feature: SkipProof\n  @skip\n  Scenario: never runs\n    Given boom\n'), reg);
+}
+
+// --- world.defer (scenario-scoped cleanup) ------------------------------------
+
+test('deferred cleanup runs LIFO after the steps', async () => {
+  const reg = new StepRegistry();
+  /** @type {string[]} */ const order = [];
+  reg.define(/^acquire (\w+)$/, (w, name) => { w.defer(() => { order.push(name); }); });
+  await executeSteps([
+    { keyword: 'Given', text: 'acquire outer' },
+    { keyword: 'And', text: 'acquire inner' },
+  ], reg);
+  assert.deepStrictEqual(order, ['inner', 'outer']);
+});
+
+test('cleanup still runs when a step fails, and the step error wins', async () => {
+  const reg = new StepRegistry();
+  let cleaned = false;
+  reg.define('setup', (w) => { w.defer(() => { cleaned = true; throw new Error('cleanup also failed'); }); });
+  reg.define('boom', () => { throw new Error('step failed'); });
+  await assert.rejects(
+    () => executeSteps([{ keyword: 'Given', text: 'setup' }, { keyword: 'When', text: 'boom' }], reg),
+    /step failed/,
+  );
+  assert.ok(cleaned, 'deferred cleanup must run despite the step failure');
+});
+
+test('a cleanup error surfaces when the steps themselves passed', async () => {
+  const reg = new StepRegistry();
+  reg.define('setup', (w) => { w.defer(() => { throw new Error('leak detected'); }); });
+  await assert.rejects(
+    () => executeSteps([{ keyword: 'Given', text: 'setup' }], reg),
+    /leak detected/,
+  );
+});
+
+// --- Snippets -------------------------------------------------------------------
+
+test('buildSnippet converts numbers and quoted strings to captures', () => {
+  assert.strictEqual(
+    buildSnippet('the 5h meter moved from 40% to 50.5% over "a b" minutes at /tmp/x'),
+    'reg.define(/^the (\\d+)h meter moved from (\\d+)% to ([\\d.]+)% over "([^"]*)" minutes at \\/tmp\\/x$/,'
+    + " (w, p1, p2, p3, p4) => {\n  throw new Error('pending: implement this step');\n});",
+  );
+});
+
+test('the generated snippet is valid JS, matches its own step, and throws pending', () => {
+  const text = 'the 5h meter shows "busy" at 42%';
+  const stub = { re: /x/, fn: /** @type {any} */ (null), define(/** @type {any} */ re, /** @type {any} */ fn) { this.re = re; this.fn = fn; } };
+  new Function('reg', buildSnippet(text))(stub); // throws if the snippet isn't valid JS
+  assert.ok(stub.re.test(text), 'snippet regex matches the original step text');
+  assert.throws(() => stub.fn({}, '5', 'busy', '42'), /pending/, 'generated body must throw, never pass vacuously');
 });

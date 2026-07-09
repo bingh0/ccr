@@ -1,39 +1,17 @@
 // @ts-check
 // test/features.test.js
 // Executes the Gherkin acceptance criteria in features/ via the zero-dep
-// harness. EVERY features/*.feature is discovered (never a hardcoded list, so a
-// new feature file can't be silently left out), and each runs against its OWN
-// scoped registry — step definitions never leak between features.
+// harness's high-level runner. runFeatures() discovers EVERY features/*.feature
+// (never a hardcoded list, so a new feature file can't be silently left out),
+// scopes each to its own step registry, and registers the guard tests: no
+// ambiguous steps, no unbound steps (which would register as TODO — reported as
+// PASSING by node:test), and no definer keys naming a missing feature file.
+//
+// A feature still being bootstrapped may allow TODO scenarios by listing its
+// basename in `wip` — visible in this diff, never implicit.
 
-const fs = require('node:fs');
 const path = require('node:path');
-const { test } = require('node:test');
-const assert = require('node:assert');
-const { StepRegistry, runFeatureFile, parseFeature } = require('./gherkin');
+const { runFeatures } = require('./gherkin');
 const STEP_DEFINERS = require('./steps');
 
-const FEATURES_DIR = path.join(__dirname, '..', 'features');
-
-for (const file of fs.readdirSync(FEATURES_DIR).filter((f) => f.endsWith('.feature')).sort()) {
-  const base = file.replace(/\.feature$/, '');
-  const featureFile = path.join(FEATURES_DIR, file);
-
-  // Fresh registry per feature, populated only with this feature's steps.
-  const registry = new StepRegistry();
-  const definer = STEP_DEFINERS[base];
-  if (definer) definer(registry);
-
-  // Guard: within this feature, every step must resolve to exactly one
-  // definition. Catches intra-file ambiguity loudly and located, instead of
-  // silently taking whichever pattern registered first.
-  test(`${base} :: step definitions are unambiguous`, () => {
-    const parsed = parseFeature(fs.readFileSync(featureFile, 'utf8'), featureFile);
-    const steps = [...parsed.background, ...parsed.scenarios.flatMap((s) => s.steps)];
-    const ambiguous = steps
-      .filter((s) => registry.steps.filter((d) => s.text.match(d.re)).length > 1)
-      .map((s) => `"${s.text}"`);
-    assert.strictEqual(ambiguous.length, 0, `steps matching >1 definition: ${ambiguous.join('; ')}`);
-  });
-
-  runFeatureFile(featureFile, registry);
-}
+runFeatures(path.join(__dirname, '..', 'features'), STEP_DEFINERS, { wip: [] });

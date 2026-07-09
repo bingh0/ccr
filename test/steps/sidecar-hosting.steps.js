@@ -12,18 +12,24 @@ const { composeFrame, updateFeed } = require('../../src/sidecar');
 
 /** @param {import('../gherkin').StepRegistry} reg */
 module.exports = function defineSidecarHostingSteps(reg) {
+  /** create a state dir cleaned up when the scenario ends, pass or fail */
+  const stateDir = (/** @type {Record<string, any>} */ w) => {
+    w.dir = freshDir();
+    w.defer(() => fs.rmSync(w.dir, { recursive: true, force: true }));
+    return w.dir;
+  };
+
   // Waiting
-  reg.define(/^the split window has just opened$/, (w) => { w.dir = freshDir(); });
+  reg.define(/^the split window has just opened$/, (w) => { stateDir(w); });
   reg.define(/^Claude has not yet produced a status tick$/, () => {});
   reg.define(/^the sidecar pane renders$/, (w) => { w.frame = composeFrame(w.dir); });
   reg.define(/^it shows "waiting for the first status tick…"$/, (w) => {
     assert.match(w.frame, /waiting for the first status tick/);
-    fs.rmSync(w.dir, { recursive: true, force: true });
   });
 
   // Live panel
   reg.define(/^Claude has written a snapshot to CCR_STATE_DIR\/last-status\.json$/, (w) => {
-    w.dir = w.dir || freshDir();
+    if (!w.dir) stateDir(w);
     fs.writeFileSync(path.join(w.dir, 'last-status.json'), SAMPLE);
   });
   reg.define(/^the sidecar redraws$/, (w) => { w.frame = composeFrame(w.dir, { now: 1_000_000 }); });
@@ -31,12 +37,20 @@ module.exports = function defineSidecarHostingSteps(reg) {
     assert.ok(!/waiting/.test(w.frame), 'no longer waiting');
     assert.ok(/[▓░]/.test(w.frame), 'block glyphs present');
     assert.ok(/\x1b\[/.test(w.frame), 'ANSI color present');
-    fs.rmSync(w.dir, { recursive: true, force: true });
+  });
+  // Value fidelity: the snapshot's numbers must survive normalize → render, not
+  // just produce *a* panel. Pins the raw-JSON → view field mapping end to end.
+  reg.define(/^the meters carry the snapshot's numbers, not placeholders$/, (w) => {
+    const plain = w.frame.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.match(plain, /5h[^\n]*\b50% used/, "SAMPLE's five_hour 50% reaches the 5h meter");
+    assert.match(plain, /weekly[^\n]*\b40% used/, "SAMPLE's seven_day 40% reaches the weekly meter");
+    assert.match(plain, /262K/, "SAMPLE's 262000 context tokens reach the context line");
   });
 
   // Live feed
   reg.define(/^the session transcript grows as Claude works$/, (w) => {
     w.tpath = tmpFile();
+    w.defer(() => fs.rmSync(w.tpath, { force: true }));
     append(w.tpath, [toolLine('Edit', { file_path: 'a.js' })]);
   });
   reg.define(/^the sidecar tails the transcript$/, (w) => {
@@ -48,14 +62,12 @@ module.exports = function defineSidecarHostingSteps(reg) {
   });
   reg.define(/^the tool\/skills feed updates roughly once a second$/, (w) => {
     assert.ok(w.feedCount2 > w.feedCount1, `feed grows as the transcript grows (${w.feedCount1} -> ${w.feedCount2})`);
-    fs.unlinkSync(w.tpath);
   });
 
   // Staleness annotation (snapshot ages while CC is busy) — driven through the
   // real composeFrame so it pins the wiring, not just the pure liveness() policy.
   reg.define(/^Claude wrote a snapshot (\d+) minutes ago and then went quiet$/, (w, n) => {
-    w.dir = freshDir();
-    const snap = path.join(w.dir, 'last-status.json');
+    const snap = path.join(stateDir(w), 'last-status.json');
     fs.writeFileSync(snap, SAMPLE);
     w.now = Date.now();
     const agoSec = w.now / 1000 - Number(n) * 60;   // age the file's mtime
@@ -67,7 +79,6 @@ module.exports = function defineSidecarHostingSteps(reg) {
   reg.define(/^the economy panel is still shown with a dim "updated (\d+)m ago" marker$/, (w, n) => {
     assert.match(w.frame, /Opus 4\.8/, 'dashboard stays visible — the marker is never a wipe');
     assert.match(w.frame, new RegExp('updated ' + n + 'm ago'));
-    fs.rmSync(w.dir, { recursive: true, force: true });
   });
 
   // Launcher wiring: the sidebar pane must auto-cancel copy-mode so a stray scroll
@@ -92,8 +103,7 @@ module.exports = function defineSidecarHostingSteps(reg) {
 
   // Ended (sentinel round-trip)
   reg.define(/^the sidecar is rendering the live panel$/, (w) => {
-    w.dir = freshDir();
-    fs.writeFileSync(path.join(w.dir, 'last-status.json'), SAMPLE);
+    fs.writeFileSync(path.join(stateDir(w), 'last-status.json'), SAMPLE);
     assert.match(composeFrame(w.dir, { now: 1_000_000 }), /Opus 4\.8/);
   });
   reg.define(/^Claude \(pane 0\) exits and drops the "exited" sentinel in the state dir$/, (w) => {
@@ -104,6 +114,5 @@ module.exports = function defineSidecarHostingSteps(reg) {
   });
   reg.define(/^the sentinel round-trips without manual intervention$/, (w) => {
     assert.match(composeFrame(w.dir), /session ended/);
-    fs.rmSync(w.dir, { recursive: true, force: true });
   });
 };

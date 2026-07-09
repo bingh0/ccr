@@ -1,9 +1,38 @@
 # Acceptance criteria — Gherkin features
 
-These `.feature` files specify the acceptance criteria for each necessary tool the
-Windows fast release builds (see [`../SPEC.md`](../SPEC.md)). Scenarios are tagged
-`@AC#` to trace back to the eight acceptance criteria in SPEC §8 (`@AC9` =
-keep-tests-green / unit coverage).
+These `.feature` files are the executable acceptance criteria for `ccr`. Every
+feature here runs under `npm test` via the zero-dep harness's `runFeatures()`
+(`test/gherkin.js`, invoked from `test/features.test.js`), and completeness is
+**enforced**: the run fails if a feature's steps are unbound or ambiguous
+(unbound steps would otherwise register as TODO, which `node:test` reports as
+passing — the failure message includes a paste-ready snippet per missing step),
+or if a step-definer key in `test/steps/index.js` matches no feature file. A
+feature may opt into bootstrap mode (unbound steps allowed as TODO) only via
+the explicit `wip` list in `test/features.test.js`.
+
+Step definitions are **scoped per feature** — each file runs against its own
+registry (`test/steps/index.js`), so identical step sentences in two features
+may legitimately bind to different definitions. Implementation-detail
+assertions (exact argv tokens, glyph literals) live in the `test/*.test.js`
+unit layer underneath; features stay behavioral.
+
+## Feature index
+
+| Feature file | Tool / component | Criteria from |
+|---|---|---|
+| `account-limits.feature` | `src/account-limits.js` (cross-profile 5h/weekly reconciliation) | reported bug ("the sidecars don't agree") |
+| `burn-rate.feature` | `src/burn.js` (windowEstimate / binding / clearROI) | gap analysis (Gaps 1–3) + backtest |
+| `economy.feature` | `src/render/economy.js` | readability review (R#/I# codes) |
+| `feed.feature` | `src/render/feed.js` + transcript events | design (live tool/skills feed) |
+| `liveness.feature` | `src/sidecar.js` composeFrame + `src/liveness.js` policy | reported bug ("times out too quickly") |
+| `resume.feature` | `src/resume.js` + `src/render/resume.js` | design (resume-cost advisor, not a picker) |
+| `statusline.feature` | `src/render/statusline.js` | design (plain-text statusLine contract) |
+| `transcripts.feature` | `src/transcripts.js` | design (shared transcript spine) |
+
+The Windows fast release and the VS Code split-terminal path trace to
+[`../SPEC.md`](../SPEC.md); their scenarios are tagged `@AC#` back to the
+acceptance criteria in SPEC §8 and §10 (`@AC9` = keep-tests-green / unit
+coverage). The other features above predate that spec and carry no tags.
 
 | Feature file | Tool / component | Spec | Acceptance |
 |---|---|---|---|
@@ -14,11 +43,6 @@ keep-tests-green / unit coverage).
 | `doctor-windows.feature` | `src/doctor.js` Windows branch | §5.4 | §8.1 |
 | `fallback-no-wt.feature` | `fallbackNoWt()` | §2, §5.1, §6 | §8.7 |
 | `vscode-sidecar.feature` | `src/launch-vscode.js` (split-terminal) | §10 | §10.1–10.6 |
-
-Every `.feature` here is **executable**: each has step definitions registered in
-[`../test/steps/index.js`](../test/steps/index.js) and runs under `npm test` (no
-`todo` placeholders). Implementation-detail assertions (exact argv tokens, glyph
-literals) live in the `test/*.test.js` unit layer underneath.
 
 ## Traceability — every SPEC §8 and §10 criterion is covered
 

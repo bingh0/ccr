@@ -20,6 +20,7 @@ Feature: Live sidecar hosting
     Given Claude has written a snapshot to CCR_STATE_DIR/last-status.json
     When the sidecar redraws
     Then it renders the economy panel with correct block glyphs (▓ ░ ●) and colors
+    And the meters carry the snapshot's numbers, not placeholders
 
   @AC4
   Scenario: The tool/skills feed updates as the session runs

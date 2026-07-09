@@ -3,6 +3,8 @@
 # Core principle: status-line emission cadence is NOT a liveness signal. CC does
 # not tick during a single long operation, so tick-age must never blank the
 # dashboard. Only the explicit exit sentinel means "ended".
+# Screen scenarios drive the real frame composer (src/sidecar.js composeFrame)
+# against a temp state dir; the last two pin the src/liveness.js policy itself.
 
 Feature: Liveness without false timeouts
   As a user running long operations in Claude Code
@@ -50,7 +52,7 @@ Feature: Liveness without false timeouts
     Given the exit sentinel is present
     When the sidecar renders
     Then the screen shows "session ended"
-    And it shows the last-known session summary
+    And the live meters are no longer shown
 
   Scenario: Stale state alone never claims the session ended
     Given the status snapshot has not been updated for 20 minutes
