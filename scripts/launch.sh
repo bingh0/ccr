@@ -78,9 +78,22 @@ tmux new-session -d -s "$SESSION" \
   "$ENV_PREAMBLE; $CC_CMD --settings '$SETTINGS'; touch '$STATE/exited'; sleep 2; tmux kill-session -t '$SESSION' 2>/dev/null"
 tmux set-environment -t "$SESSION" CCR_STATE_DIR "$STATE"
 
-# Pane 1: the live economy sidebar.
-tmux split-window -t "$SESSION:0" -h -p "${CCR_SIDEBAR_PCT:-34}" \
-  "$ENV_PREAMBLE; \"$NODE\" \"$REPO/bin/ccr.js\" sidecar; read -r -p 'sidebar exited — Enter to close '"
+# Pane 1: the live economy sidebar. Capture its pane id so we can scope a hook to it.
+SIDEBAR_PANE="$(tmux split-window -t "$SESSION:0" -h -p "${CCR_SIDEBAR_PCT:-34}" -P -F '#{pane_id}' \
+  "$ENV_PREAMBLE; \"$NODE\" \"$REPO/bin/ccr.js\" sidecar; read -r -p 'sidebar exited — Enter to close '")"
+
+# The sidebar is a live dashboard — there is nothing to scroll. A stray mouse-wheel
+# or PageUp over its narrow pane drops tmux into copy-mode, which freezes the pane
+# at a snapshot and swallows the sidecar's per-second redraws — it looks like the
+# sidebar "got lost" (the grid keeps updating underneath; only the view is frozen).
+# Auto-cancel copy-mode the instant this pane enters it. PANE-scoped, so every other
+# pane — and the Claude pane's scrollback — keeps normal copy-mode. The cancel
+# re-fires this hook with pane_in_mode=0, so the guard stops it recursing. Best-effort:
+# pane-scoped hooks need tmux >= 3.2; older tmux just skips the guard (|| true).
+if [ -n "$SIDEBAR_PANE" ]; then
+  tmux set-hook -p -t "$SIDEBAR_PANE" pane-mode-changed \
+    "if-shell -F '#{pane_in_mode}' 'send-keys -t $SIDEBAR_PANE -X cancel'" 2>/dev/null || true
+fi
 
 tmux select-pane -t "$SESSION:0.0"
 tmux source-file -t "$SESSION" "$RUN_CONF"

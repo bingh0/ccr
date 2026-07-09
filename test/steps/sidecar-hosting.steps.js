@@ -70,6 +70,26 @@ module.exports = function defineSidecarHostingSteps(reg) {
     fs.rmSync(w.dir, { recursive: true, force: true });
   });
 
+  // Launcher wiring: the sidebar pane must auto-cancel copy-mode so a stray scroll
+  // can't freeze it. The hook is pure tmux orchestration (no Node seam), so — like
+  // windows-launcher pins buildWtArgs rather than spawning Windows Terminal — we pin
+  // the wiring structurally against scripts/launch.sh.
+  reg.define(/^the tmux launcher script scripts\/launch\.sh$/, (w) => {
+    w.launchSh = fs.readFileSync(path.join(__dirname, '..', '..', 'scripts', 'launch.sh'), 'utf8');
+  });
+  reg.define(/^it splits the sidebar pane$/, (w) => {
+    assert.match(w.launchSh, /tmux split-window[\s\S]*?sidecar/, 'launcher splits a sidebar pane running the sidecar');
+  });
+  reg.define(/^it captures the new pane id with "-P -F '#\{pane_id\}'" into SIDEBAR_PANE$/, (w) => {
+    assert.match(w.launchSh, /SIDEBAR_PANE="\$\(tmux split-window[\s\S]*?-P -F '#\{pane_id\}'/, 'captures the split pane id into SIDEBAR_PANE');
+  });
+  reg.define(/^it sets a pane-scoped pane-mode-changed hook that cancels copy-mode only while the pane is in a mode$/, (w) => {
+    // pane-scoped (-p) so the Claude pane keeps normal scrollback…
+    assert.match(w.launchSh, /tmux set-hook -p -t "\$SIDEBAR_PANE" pane-mode-changed/, 'pane-scoped pane-mode-changed hook');
+    // …guarded on #{pane_in_mode} so the cancel doesn't recurse, cancelling that pane's copy-mode.
+    assert.match(w.launchSh, /if-shell -F '#\{pane_in_mode\}' 'send-keys -t \$SIDEBAR_PANE -X cancel'/, 'guarded copy-mode cancel');
+  });
+
   // Ended (sentinel round-trip)
   reg.define(/^the sidecar is rendering the live panel$/, (w) => {
     w.dir = freshDir();

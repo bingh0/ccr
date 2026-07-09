@@ -41,3 +41,15 @@ Feature: Live sidecar hosting
     When Claude (pane 0) exits and drops the "exited" sentinel in the state dir
     Then the sidecar shows the "session ended" state
     And the sentinel round-trips without manual intervention
+
+  @AC6
+  Scenario: A stray scroll can't freeze the sidebar in copy-mode
+    # A mouse-wheel or PageUp over the narrow sidebar pane drops tmux into copy-mode,
+    # which freezes the view at a snapshot while the sidecar keeps redrawing
+    # underneath — the sidebar looks "lost" even though the meters are live. The tmux
+    # launcher scopes an auto-cancel hook to the sidebar pane so it exits copy-mode
+    # the instant it enters, while the Claude pane keeps its normal scrollback.
+    Given the tmux launcher script scripts/launch.sh
+    When it splits the sidebar pane
+    Then it captures the new pane id with "-P -F '#{pane_id}'" into SIDEBAR_PANE
+    And it sets a pane-scoped pane-mode-changed hook that cancels copy-mode only while the pane is in a mode
