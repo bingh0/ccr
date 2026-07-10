@@ -1,5 +1,12 @@
 // @ts-check
 // test/gherkin.js
+//
+// Vendored copy of gherkin-node-test@0.1.0 (MIT — github.com/bingh0/gherkin-node-test,
+// npm: gherkin-node-test). That package is the canonical source; this copy is kept
+// in-tree so ccr's acceptance suite runs on a bare `node --test` with zero install,
+// preserving the zero-runtime-dependency story. When the parser changes, change it
+// there and re-sync here (the two files are identical modulo this header).
+//
 // A tiny, zero-dependency Gherkin runner on top of Node's built-in test runner.
 //
 // It parses the practical core of Gherkin — Feature / Background / Scenario /
