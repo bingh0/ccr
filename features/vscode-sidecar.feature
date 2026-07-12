@@ -85,6 +85,18 @@ Feature: VS Code split-terminal sidecar
     Then Claude starts via `ccs c1 --settings <temp-file>`
     And the sidecar one-liner targets the "~/.ccr/c1" state dir
 
+  # The statusline subprocess (a grandchild via Claude) resolves its state dir
+  # from CCR_STATE_DIR — the launcher must thread it into the spawn, or a
+  # profile session snapshots into the DEFAULT ~/.ccr: its own sidecar starves
+  # and a concurrently running bare session (e.g. personal + work accounts at
+  # once) gets its state dir clobbered by the other account.
+  @AC10
+  Scenario: Claude inherits the profile's state dir so two accounts never mix
+    Given `ccs` is resolvable on PATH
+    And the CCS profile directory for "c1" exists
+    When I run "ccr c1"
+    Then Claude's environment carries CCR_STATE_DIR = the "~/.ccr/c1" state dir
+
   @AC10
   Scenario: Unknown CCS profile errors clearly and starts nothing
     Given `ccs` is resolvable on PATH

@@ -35,7 +35,7 @@ function deps(w) {
     dropExited: () => { w.droppedExited++; },
     writeSettings: () => 'C:\\Temp\\ccr-settings-x.json',
     cleanup: (/** @type {string} */ f) => { w.cleaned.push(f); },
-    spawnClaude: (/** @type {string} */ bin, /** @type {string[]} */ args) => { w.spawnedClaude = { bin, args }; return { status: 0 }; },
+    spawnClaude: (/** @type {string} */ bin, /** @type {string[]} */ args, /** @type {Record<string,string>=} */ extraEnv) => { w.spawnedClaude = { bin, args, extraEnv }; return { status: 0 }; },
     spawnCopy: (/** @type {string} */ cmd, /** @type {string[]} */ a, /** @type {string} */ input) => { w.copied = (w.copied || []).concat({ cmd, input }); return { status: 0 }; },
     sidecarAlive: () => !!w.sidecarAlive,
   };
@@ -91,6 +91,11 @@ module.exports = function defineVscodeSidecarSteps(reg) {
     assert.ok(w.out.includes(`--state-dir "${expected}"`), w.out);
   });
   reg.define(/^stderr explains the profile was not found$/, (w) => assert.match(w.err, /not found/));
+
+  reg.define(/^Claude's environment carries CCR_STATE_DIR = the "~\/\.ccr\/c1" state dir$/, (w) => {
+    const expected = path.join(w.home || '/home/me', '.ccr', 'c1');
+    assert.strictEqual(w.spawnedClaude.extraEnv && w.spawnedClaude.extraEnv.CCR_STATE_DIR, expected);
+  });
 
   // Relaunch dedupe: fresh heartbeat → note instead of banner + clipboard.
   reg.define(/^a live sidecar is already attached to the state dir$/, (w) => { w.sidecarAlive = true; });

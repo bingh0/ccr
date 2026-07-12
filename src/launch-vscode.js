@@ -164,11 +164,16 @@ function run(profile, deps = {}) {
     copyToClipboard(sidecarCmd, d);
   }
 
-  // Run Claude in the current pane (blocks until exit). The temp settings file is
-  // always removed; the "session ended" sentinel is only dropped if Claude
-  // actually ran — a failed spawn must NOT flip the sidecar to "ended".
+  // Run Claude in the current pane (blocks until exit). CCR_STATE_DIR rides the
+  // spawn env so the statusline subprocess (a grandchild via Claude) snapshots
+  // into THIS profile's state dir — without it a profile session writes to the
+  // default ~/.ccr, starving its own sidecar and clobbering a concurrently
+  // running bare session's (the wt.exe launcher injects the same var per pane).
+  // The temp settings file is always removed; the "session ended" sentinel is
+  // only dropped if Claude actually ran — a failed spawn must NOT flip the
+  // sidecar to "ended".
   const parts = st.ccCmd.split(' ');
-  const r = d.spawnClaude(parts[0], [...parts.slice(1), '--settings', settingsFile]);
+  const r = d.spawnClaude(parts[0], [...parts.slice(1), '--settings', settingsFile], { CCR_STATE_DIR: st.stateDir });
   d.cleanup(settingsFile);
   if (r && r.error) { d.err(`ccr: failed to launch Claude: ${r.error.message}\n`); return 1; }
   d.dropExited(st.stateDir);
@@ -237,15 +242,17 @@ function buildClaudeSpawn(bin, args, o) {
  *
  * @param {string} bin
  * @param {string[]} args
+ * @param {Record<string, string>} [extraEnv] merged over process.env (CCR_STATE_DIR)
  * @returns {{ status: number|null, error?: Error }}
  */
-function defaultSpawnClaude(bin, args) {
+function defaultSpawnClaude(bin, args, extraEnv) {
   const built = buildClaudeSpawn(bin, args, { platform: process.platform, which: defaultWhich });
   if ('error' in built) return { status: null, error: built.error };
   const { spawnSync } = require('node:child_process');
+  const env = { ...process.env, ...extraEnv };
   return built.shell
-    ? spawnSync(built.command, { stdio: 'inherit', shell: true })
-    : spawnSync(built.command, built.args || [], { stdio: 'inherit' });
+    ? spawnSync(built.command, { stdio: 'inherit', shell: true, env })
+    : spawnSync(built.command, built.args || [], { stdio: 'inherit', env });
 }
 
 /** @param {string} name @returns {string|null} */
@@ -306,7 +313,7 @@ function withDefaults(deps) {
  * @property {(dir: string) => void} dropExited
  * @property {(settings: object) => string} writeSettings
  * @property {(file: string) => void} cleanup
- * @property {(bin: string, args: string[]) => {status: number|null, error?: Error}} spawnClaude
+ * @property {(bin: string, args: string[], extraEnv?: Record<string, string>) => {status: number|null, error?: Error}} spawnClaude
  * @property {(cmd: string, args: string[], input: string) => {status: number|null, error?: Error}} spawnCopy
  * @property {(stateDir: string) => boolean} sidecarAlive
  */
