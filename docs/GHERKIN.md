@@ -1,11 +1,19 @@
 # `test/gherkin.js` — a minimal, zero-dependency BDD runner for JavaScript
 
 A **targeted** tool: it runs Gherkin (`.feature`) acceptance tests in plain
-JavaScript with **zero npm dependencies and no build step**, on top of Node's
-built-in `node:test`. In ccr it executes the criteria in
-[`features/`](../features/). At ~520 lines (a third of which is documentation)
-it's one of the smallest practical Gherkin runners you'll find — small enough
-to read in one sitting, and small enough to vendor as a single file.
+JavaScript with **zero npm dependencies and no build step**, on top of the
+runtime's built-in test runner (`node:test` under Node; natively `bun:test`
+under Bun; Deno's `node:test` bridge under Deno — ccr itself runs it on Node).
+In ccr it executes the criteria in [`features/`](../features/). At ~730 lines
+(a third of which is documentation) it's one of the smallest practical Gherkin
+runners you'll find — small enough to read in one sitting, and small enough to
+vendor as a single file.
+
+`test/gherkin.js` is a vendored copy of
+[`gherkin-node-test`](https://github.com/bingh0/gherkin-node-test)
+([npm](https://www.npmjs.com/package/gherkin-node-test)) — that package is the
+canonical, standalone home; use it directly in other projects. The copy here
+keeps ccr's suite running on a bare `node --test` with zero install.
 
 It exists because the alternative — pulling in `@cucumber/gherkin` + a Vitest/Jest
 binding — would add a dependency tree and a build step to a tool whose whole
@@ -20,9 +28,10 @@ This is a **targeted** option, not a general Cucumber replacement. It fits when
 
 - you want **BDD / Gherkin in JavaScript**, with **zero dependencies** and **no
   build step**;
-- running on Node's built-in `node:test` is fine; and
+- running on the runtime's built-in test runner (`node:test` / `bun:test`) is
+  fine; and
 - the practical core of Gherkin (Feature / Background / Scenario / Scenario
-  Outline + Examples / step data tables / `@skip` `@todo` `@only` tags) covers
+  Outline + Examples / step data tables / `@skip` `@todo` tags) covers
   your `.feature` files.
 
 That's the whole niche: the smallest thing that turns `.feature` files into real
@@ -85,7 +94,12 @@ Run with `node --test`. Alongside the scenarios, `runFeatures` registers guards:
   CI stays green. The failure message includes a **paste-ready snippet** for
   each missing step;
 - `@skip`'d scenarios are ratcheted too: skip means "don't run", never
-  "don't bind".
+  "don't bind";
+- **one `runFeatures` call per test file** — a second call in the same file is
+  refused as a registered failing test. (Under Deno, a top-level throw after an
+  earlier `test()` registration is silently swallowed and `deno test` exits 0;
+  a single call per file keeps every load-time error ahead of every
+  registration, so it surfaces loudly on all runtimes.)
 
 Step registries are **scoped per feature**: one feature's patterns can never
 match another feature's steps, so there is no global step namespace — identical
@@ -103,7 +117,7 @@ sentences in two features may legitimately bind to different definitions.
 | `<placeholder>` | substituted from the Examples columns — in step text **and** in step data tables; every `<name>` must match a column |
 | Steps | `Given` `When` `Then` `And` `But` `*`, followed by step text |
 | Step data tables | `\|` rows after a step attach to that step; the step function receives a **`DataTable`** as its last argument |
-| Tags | `@skip` / `@todo` / `@only` map to the `node:test` options of the same name; tags on `Feature:` apply to all its scenarios; any other tag (e.g. `@AC3`) is carried on `scenario.tags` but has no runtime effect |
+| Tags | `@skip` never runs the scenario (steps must still bind); `@todo` registers it but never gates; tags on `Feature:` apply to all its scenarios; any other tag (e.g. `@AC3`) is carried on `scenario.tags` but has no runtime effect |
 | `# comment` | ignored anywhere |
 | Feature narrative | the `As a… / I want… / So that…` prose block is ignored |
 
@@ -113,8 +127,12 @@ literal, so cells like `C:\Temp` or `Cmd+\` need no escaping.
 
 Tag semantics on the runner side: `@skip` never executes the scenario;
 `@todo` executes it but its failures don't fail the run (`node:test` TODO
-semantics); `@only` is honored when Node is started with `--test-only`,
-otherwise it has no effect.
+semantics). `@only` is **rejected** as a registered failing test: focus
+semantics differ irreconcilably across runtimes (Node: inert without
+`--test-only`; Bun/Deno: focuses its file on every run, and Deno exits 0 — a
+committed `@only` would silently narrow a CI run). Focus one scenario with the
+runner's own per-run flag instead. Combining `@skip`/`@todo`/`@only` on one
+scenario is likewise a loud error — runners disagree on which would win.
 
 ### Step matching and `DataTable`
 
@@ -189,7 +207,9 @@ Each of these throws `GherkinSyntaxError` with the offending line number:
 | A `Scenario`/`Scenario Outline` with no steps | would run zero assertions and pass vacuously |
 | A step *after* its `Examples:` table | malformed ordering; the step would mis-attach |
 | Tags anywhere but immediately before `Feature:` / `Scenario:` / `Scenario Outline:` | a mis-placed `@skip` would silently not skip |
-| A near-miss semantic tag (`@Skip`, `@SKIP`, `@Only`, …) | would be silently inert — worst for `@only`, where the typo silently *deselects* the scenario under `--test-only` |
+| `@only` (well-formed) | focus behaves three different ways on the three runtimes — a committed `@only` would silently narrow a CI run (the one entry here rejected as a *registered failing test* rather than a parse error, so it shows up in the run, not at load) |
+| `@skip`/`@todo`/`@only` combined on one scenario | runners disagree on which tag wins |
+| A near-miss semantic tag (`@Skip`, `@SKIP`, `@Only`, …) | would be silently inert |
 | `Rule:` (Gherkin 6) | grouping would be silently flattened |
 | A step before any `Scenario`/`Background` | would be silently discarded |
 | A 2nd `Feature:` / `Background:`, or `Background:` after a `Scenario` | ambiguous scope |
@@ -241,12 +261,15 @@ silent coverage hole).
 | `parseFeature(text, filename?)` | parse → `{ feature, background, scenarios }`; throws `GherkinSyntaxError` |
 | `StepRegistry` | `.define(pattern, fn)` / `.find(text)` |
 | `executeSteps(steps, registry, world?)` | run a flat step list against a shared world (installs `world.defer`) |
-| `runFeature(parsed, registry)` | register a `node:test` per scenario (tags mapped, unbound → TODO) |
+| `runFeature(parsed, registry)` | register a runner test per scenario (tags applied, `@only` rejected, unbound → TODO) |
 | `runFeatureFile(file, registry)` | read + parse + run a `.feature` file |
 | `DataTable` | cucumber-compatible step table: `raw` / `rows` / `hashes` / `rowsHash` / `transpose` |
 | `buildSnippet(text)` | paste-ready step definition for an unbound step (body throws) |
 | `GherkinSyntaxError` | thrown on unsupported/malformed syntax; carries `.line` |
 
 The whole thing is covered by [`test/harness.test.js`](../test/harness.test.js),
-including a rejection test for every guard above, a self-proving `@skip`
-scenario whose only step throws, and an eval of a generated snippet.
+including a rejection test for every parse-time guard above, a self-proving
+`@skip` scenario whose only step throws, and an eval of a generated snippet.
+The registration-level guards (`@only`, a second `runFeatures` call) are proven
+by subprocess in the canonical package's own suite —
+[`gherkin-node-test`](https://github.com/bingh0/gherkin-node-test).

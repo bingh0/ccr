@@ -115,6 +115,8 @@ const REJECTED = [
     '@Skip\nScenario: s\n  Given x', /near-miss tag is silently inert/],
   ['a near-miss @only (would silently deselect under --test-only)',
     '@ONLY\nScenario: s\n  Given x', /near-miss tag is silently inert/],
+  ['combined semantic tags (runners disagree on which wins)',
+    '@skip @todo\nScenario: s\n  Given x', /mutually exclusive/],
   ['the Rule: keyword',
     'Rule: r\n  Scenario: s\n    Given x', /Rule: keyword/],
   ['Examples outside an outline',

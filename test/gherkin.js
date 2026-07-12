@@ -1,18 +1,22 @@
 // @ts-check
 // test/gherkin.js
 //
-// Vendored copy of gherkin-node-test@0.1.0 (MIT — github.com/bingh0/gherkin-node-test,
+// Vendored copy of gherkin-node-test@0.3.0 (MIT — github.com/bingh0/gherkin-node-test,
 // npm: gherkin-node-test). That package is the canonical source; this copy is kept
 // in-tree so ccr's acceptance suite runs on a bare `node --test` with zero install,
 // preserving the zero-runtime-dependency story. When the parser changes, change it
-// there and re-sync here (the two files are identical modulo this header).
+// there and re-sync here (this file is the upstream index.js with only this
+// vendor note inserted after the @ts-check line).
 //
-// A tiny, zero-dependency Gherkin runner on top of Node's built-in test runner.
+// gherkin-node-test
+// A tiny, zero-dependency Gherkin runner on top of the runtime's built-in test
+// runner: node:test under Node, bun:test natively under Bun, and node:test
+// under Deno (whose node:test bridges to the native Deno.test runner).
 //
 // It parses the practical core of Gherkin — Feature / Background / Scenario /
 // Scenario Outline + Examples, with Given·When·Then·And·But·* steps, step-level
-// data tables, and @skip/@todo/@only tags — and turns each scenario into a
-// node:test test(). Scenario Outlines are expanded once per Examples row.
+// data tables, and @skip/@todo/@only tags — and turns each scenario into one
+// runner test(). Scenario Outlines are expanded once per Examples row.
 //
 // The high-level entry point is runFeatures(dir, definers, { wip }): it
 // discovers every *.feature in dir, runs each against its OWN scoped registry
@@ -20,7 +24,8 @@
 // fail on ambiguous steps, on unbound steps (which would otherwise register as
 // TODO — reported as PASSING by node:test), and on definer keys that match no
 // feature file. A feature still being bootstrapped opts out of the unbound-step
-// ratchet by name via `wip`.
+// ratchet by name via `wip`. ONE runFeatures call per test file — a second
+// call in the same file is refused as a registered failing test (see below).
 //
 // SUPPORTED grammar (the practical core, guarded loudly):
 //   Feature:            one per file, required
@@ -33,10 +38,18 @@
 //                       receives a cucumber-compatible DataTable as its last
 //                       argument (raw/rows/hashes/rowsHash/transpose). Cells
 //                       honor \| \\ \n escapes; other backslashes are literal.
-//   Tags:               @skip / @todo / @only map to the node:test options of
-//                       the same name (@only needs `node --test --test-only`);
-//                       tags on Feature: apply to all its scenarios; all other
+//   Tags:               @skip → never run (steps must still bind); @todo →
+//                       registered, never gates. @only is REJECTED as a
+//                       registered failing test: focus semantics differ
+//                       irreconcilably across the runtimes (Node: inert
+//                       without --test-only; Bun/Deno: focuses its file on
+//                       every run, and Deno exits 0 — a committed @only would
+//                       silently narrow a CI run). Focus one scenario with the
+//                       runner's own per-run flag instead (see README).
+//                       Tags on Feature: apply to all its scenarios; all other
 //                       tags (e.g. @AC3) are carried but have no effect.
+//                       Combining @skip/@todo/@only on one scenario is a loud
+//                       error — runners disagree on which would win.
 //   Comments (# ...) and the Feature narrative are ignored.
 //
 // DELIBERATELY NOT SUPPORTED. Structural misuse is REJECTED LOUDLY — each throws
@@ -54,18 +67,115 @@
 //     narrative and ignored; if that leaves a scenario empty the no-steps guard
 //     fires, so it still can't pass vacuously.
 // If you need the real thing, reach for @cucumber/gherkin.
-// See docs/GHERKIN.md for the full grammar and rationale.
+// See README.md for the full grammar and rationale.
 //
-// No npm deps — Node ≥18 stdlib only. Run with `node --test`.
+// No npm deps — Node ≥18 stdlib only. Run with `node --test`, `bun test`, or
+// `deno test --allow-read` (Deno needs read permission for the .feature files).
 
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert');
-const { test } = require('node:test');
+const url = require('node:url');
+
+// Under Bun, register tests natively on bun:test: Bun's node:test shim is
+// partial (its own compat docs say "use bun:test instead") and deliberately
+// drops the `only:` option. The dynamic specifier keeps each runtime loading
+// only its own module. Deno is NOT a special case here: its node:test is a
+// faithful polyfill that bridges to the native Deno.test runner (option-form
+// skip/todo honored), so `deno test` runs this via node:test natively.
+const isBun = !!process.versions.bun;
+const isDeno = !!(/** @type {any} */ (globalThis).Deno?.version?.deno);
+const { test } = require(isBun ? 'bun:test' : 'node:test');
+
+/**
+ * Register one test on the active runner. node:test takes skip/todo as
+ * options; bun:test takes them as methods. At most one of the two is ever
+ * set (the parser rejects combined semantic tags), so the method chain cannot
+ * silently invent a precedence the other runner disagrees with. The runners'
+ * focus mechanisms (only: / test.only) are never used — @only is rejected
+ * instead (see runFeature), because focus behaves three different ways on the
+ * three runtimes.
+ * @param {string} title
+ * @param {{ skip?: boolean, todo?: boolean | string }} opts
+ * @param {() => (void | Promise<void>)} fn
+ */
+function registerTest(title, opts, fn) {
+  // The Bun branch is invisible to `node --test` coverage by construction;
+  // it is exercised by running this same suite under `bun test` (CI bun lane).
+  /* node:coverage ignore next 6 */
+  if (isBun) {
+    if (opts.skip) test.skip(title, fn);
+    else if (opts.todo) test.todo(title, fn);
+    else test(title, fn);
+    return;
+  }
+  test(title, opts, fn);
+}
+
+// ONE runFeatures call per test file, enforced. Under Deno, a top-level throw
+// that happens AFTER an earlier test() has been registered in the same file is
+// silently swallowed — `deno test` exits 0. A second runFeatures call is
+// exactly where that swallow would hide a load-time error (a non-function
+// definer, an unparseable feature file). Confining each test file to a single
+// call keeps every load-time error ahead of every registration, so it surfaces
+// loudly on all three runtimes.
+//
+// "The current test file" is identified by TWO signals combined, because each
+// alone has a mode where different test files collapse to one value (and a
+// collapsed key would falsely refuse a legitimate suite — this guard must
+// never inflict the narrowing it exists to prevent):
+//  - main module (Bun.main / Deno.mainModule follow the file being collected;
+//    Node's require.main is the test file, one process per file) — but under
+//    `node --test --experimental-test-isolation=none` every file shares one
+//    process and require.main pins to the FIRST test file;
+//  - the calling file from the stack (the runFeatures call site physically
+//    lives in the test file) — but a shared helper module that wraps
+//    runFeatures would put the same helper file in every stack.
+// Two files collide only if BOTH signals collide, and even then the refusal is
+// a loud failing test, never a silent skip.
+const filesWithRunFeatures = new Set();
+
+// This module's own identity in stack frames: a path under Node/Bun, a
+// file:// URL under Deno.
+const SELF_FILES = [__filename, url.pathToFileURL(__filename).href];
+
+/**
+ * The file whose code called into this module — the first stack frame outside
+ * index.js. All three runtimes emit V8-style "at fn (path:line:col)" frames.
+ * @returns {string} '' when no frame parses (exotic embedder) — the
+ *   main-module half of the key still distinguishes test files there.
+ */
+function callerFile() {
+  let found = '';
+  for (const frame of (new Error().stack || '').split('\n')) {
+    const t = frame.trim();
+    if (!t.startsWith('at ')) continue;
+    let loc = t.slice(3);
+    // "at fn (path:1:2)" → path:1:2 — tolerating parens inside the path
+    const open = loc.indexOf('(');
+    if (open !== -1 && loc.endsWith(')')) loc = loc.slice(open + 1, -1);
+    const m = loc.match(/^(.+):\d+:\d+$/);
+    if (m && !SELF_FILES.includes(m[1])) { found = m[1]; break; }
+  }
+  return found;
+}
+
+/** @returns {{ key: string, display: string }} */
+function currentTestFile() {
+  const g = /** @type {any} */ (globalThis);
+  // The Bun/Deno branches are invisible to `node --test` coverage by
+  // construction; the CI bun and deno lanes exercise them.
+  /* node:coverage ignore next 3 */
+  const main = isBun ? g.Bun.main
+    : isDeno ? g.Deno.mainModule
+      : (require.main?.filename ?? process.argv[1] ?? '');
+  const caller = callerFile();
+  return { key: `${main}\u0000${caller}`, display: caller || main || 'this test file' };
+}
 
 /** @typedef {{ keyword: string, text: string, table?: string[][] }} Step */
 /** @typedef {{ name: string, steps: Step[], line: number, tags: string[] }} Scenario */
-/** @typedef {{ feature: string, background: Step[], scenarios: Scenario[] }} ParsedFeature */
+/** @typedef {{ feature: string, background: Step[], scenarios: Scenario[], file: string }} ParsedFeature */
 /** @typedef {(world: Record<string, any>, ...args: any[]) => (void | Promise<void>)} StepFn */
 
 /**
@@ -88,6 +198,17 @@ class GherkinSyntaxError extends Error {
  */
 function escapeRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * A feature's basename — the key used in `definers`, in guard-test titles, and
+ * in the @only rejection title. One definition so the three sites can never
+ * drift apart.
+ * @param {string} file path or basename of a .feature file
+ * @returns {string}
+ */
+function featureBase(file) {
+  return path.basename(file).replace(/\.feature$/, '');
 }
 
 // --- Data tables --------------------------------------------------------------
@@ -166,6 +287,19 @@ function parseFeature(text, filename = '<feature>') {
 
   /** Consume pending tags (for a construct that accepts them). */
   const takeTags = () => { const t = pendingTags; pendingTags = []; return t; };
+  /**
+   * Reject a combination of semantic tags: node:test takes them as options
+   * (with its own precedence), bun:test as mutually exclusive methods — a
+   * combination cannot mean the same thing on both runners, so it must not
+   * mean anything silently.
+   * @param {string[]} tags @param {number} lineNo
+   */
+  const noTagConflict = (tags, lineNo) => {
+    const semantic = [...new Set(tags.filter((t) => t === '@skip' || t === '@todo' || t === '@only'))];
+    if (semantic.length > 1) {
+      fail(lineNo, `conflicting tags (${semantic.join(' ')}) — @skip/@todo/@only are mutually exclusive; keep exactly one`);
+    }
+  };
   /** Reject pending tags (for a line that must not carry them). @param {number} lineNo */
   const noTags = (lineNo) => {
     if (pendingTags.length) {
@@ -242,8 +376,8 @@ function parseFeature(text, filename = '<feature>') {
       const tags = line.split(/\s+/);
       for (const t of tags) {
         // A near-miss of a semantic tag (@Skip, @SKIP, @Only…) would be
-        // silently inert — worst for @only, where the typo silently
-        // DESELECTS the scenario under --test-only. Reject it loudly.
+        // silently inert — @Skip would run a scenario meant to be skipped,
+        // @Only would dodge the loud @only rejection. Reject it loudly.
         if (/^@(skip|todo|only)$/i.test(t) && t !== '@skip' && t !== '@todo' && t !== '@only') {
           fail(lineNo, `tag ${t} looks like ${t.toLowerCase()} but isn't exact — a near-miss tag is silently inert; use lowercase`);
         }
@@ -261,7 +395,7 @@ function parseFeature(text, filename = '<feature>') {
     let m;
     if ((m = line.match(/^Feature:\s*(.*)$/))) {
       if (featureSeen) fail(lineNo, 'multiple Feature: blocks in one file');
-      flushOutline(); feature = m[1]; featureSeen = true; featureTags = takeTags(); cur = null; inExamples = false; continue;
+      flushOutline(); feature = m[1]; featureSeen = true; featureTags = takeTags(); noTagConflict(featureTags, lineNo); cur = null; inExamples = false; continue;
     }
     if (line.startsWith('Background:')) {
       noTags(lineNo);
@@ -273,11 +407,13 @@ function parseFeature(text, filename = '<feature>') {
     if ((m = line.match(/^Scenario Outline:\s*(.*)$/))) {
       flushOutline();
       outline = { name: m[1], steps: [], header: null, rows: [], examplesSeen: false, line: lineNo, tags: [...featureTags, ...takeTags()] };
+      noTagConflict(outline.tags, lineNo);
       cur = outline.steps; inExamples = false; continue;
     }
     if ((m = line.match(/^Scenario:\s*(.*)$/))) {
       flushOutline();
       const sc = { name: m[1], steps: [], line: lineNo, tags: [...featureTags, ...takeTags()] };
+      noTagConflict(sc.tags, lineNo);
       scenarios.push(sc); cur = sc.steps; inExamples = false; continue;
     }
     if (line.startsWith('Examples:')) {
@@ -332,7 +468,7 @@ function parseFeature(text, filename = '<feature>') {
   for (const sc of scenarios) {
     if (sc.steps.length === 0) fail(sc.line, `Scenario "${sc.name}" has no steps`);
   }
-  return { feature, background, scenarios };
+  return { feature, background, scenarios, file: filename };
 }
 
 // --- Step registry ----------------------------------------------------------
@@ -441,29 +577,48 @@ async function executeSteps(steps, registry, world = {}) {
 }
 
 /**
- * Register one node:test per scenario. Scenarios whose steps aren't all
+ * Register one runner test per scenario. Scenarios whose steps aren't all
  * defined register as TODO (see runFeatures for the guard that keeps TODO from
  * silently swallowing a bound feature). Tag mapping: @skip → skipped, @todo →
- * runs but doesn't gate the suite, @only → honored under `--test-only`.
+ * doesn't gate the suite. @only maps to NOTHING — it registers a failing test
+ * instead, because the runners' focus semantics are irreconcilable: Node keeps
+ * only: inert without --test-only; Bun and Deno focus the file on every run
+ * with no flag, and Deno exits 0 doing it, so a committed @only would silently
+ * narrow a CI run there. Rejection is uniform, additive (every scenario still
+ * registers and runs — nothing narrows), and REGISTERED rather than thrown, so
+ * Deno's load-throw swallow can't eat it. Focus one scenario with the runner's
+ * own per-run flag instead: `node --test --test-name-pattern <re>`,
+ * `bun test -t <re>`, or `deno test --filter <text>` — a CLI argument can't be
+ * committed into the suite, which is the point.
  * @param {ParsedFeature} parsed
  * @param {StepRegistry} registry
  */
 function runFeature(parsed, registry) {
+  if (parsed.scenarios.some((sc) => sc.tags.includes('@only'))) {
+    const base = featureBase(parsed.file);
+    const msg = `${parsed.file}: @only is not supported; run one scenario with `
+      + '`node --test --test-name-pattern <re>` / `bun test -t <re>` / `deno test --filter <text>`';
+    registerTest(`${base} :: @only is not supported`, {}, () => { throw new Error(msg); });
+  }
   for (const sc of parsed.scenarios) {
     const steps = [...parsed.background, ...sc.steps];
     const title = `${parsed.feature} :: ${sc.name}`;
     const missing = steps.filter((s) => !registry.find(s.text));
     if (missing.length) {
-      test(title, { todo: `${missing.length} undefined step(s); first: "${missing[0].text}"` }, () => {});
+      const reason = `${missing.length} undefined step(s); first: "${missing[0].text}"`;
+      // The placeholder body THROWS its reason: an empty body would pass
+      // vacuously under modes that execute todo bodies — `bun test --todo`
+      // even FAILS a todo that passes. A throwing todo gates nothing on
+      // either runner and keeps the reason visible wherever bodies run.
+      registerTest(title, { todo: reason }, () => { throw new Error(reason); });
       continue;
     }
     const tags = new Set(sc.tags);
-    /** @type {{ skip?: boolean, todo?: boolean, only?: boolean }} */
+    /** @type {{ skip?: boolean, todo?: boolean }} */
     const opts = {};
     if (tags.has('@skip')) opts.skip = true;
     if (tags.has('@todo')) opts.todo = true;
-    if (tags.has('@only')) opts.only = true;
-    test(title, opts, async () => { await executeSteps(steps, registry); });
+    registerTest(title, opts, async () => { await executeSteps(steps, registry); });
   }
 }
 
@@ -492,22 +647,38 @@ function runFeatureFile(file, registry) {
  *    step. @skip'd scenarios are ratcheted too: skip means "don't run",
  *    never "don't bind".
  *
+ * One runFeatures call per test file, enforced: a second call in the same
+ * test file registers a single failing test naming the fix and does nothing
+ * else. See filesWithRunFeatures above for why (Deno silently swallows a
+ * load-time throw once an earlier call has registered a test — a second call
+ * is exactly where a bad definer or an unparseable feature would vanish).
+ * Give each feature directory its own test file.
+ *
  * @param {string} dir directory containing .feature files
  * @param {Record<string, (reg: StepRegistry) => any>} definers feature basename → step definer
  * @param {{ wip?: Iterable<string> }} [opts] feature basenames still bootstrapping (TODO allowed)
  */
 function runFeatures(dir, definers, opts = {}) {
+  const testFile = currentTestFile();
+  if (filesWithRunFeatures.has(testFile.key)) {
+    registerTest('runFeatures: one call per test file', {}, () => {
+      throw new Error(
+        `runFeatures(${JSON.stringify(dir)}, …) is a second runFeatures call in ${testFile.display} — `
+        + 'one call per test file: a load-time error in a later call (a non-function definer, an '
+        + 'unparseable feature file) is silently swallowed under Deno once an earlier call has '
+        + 'registered a test. Give each feature directory its own test file.');
+    });
+    return;
+  }
+
   const wip = new Set(opts.wip || []);
   const files = fs.readdirSync(dir).filter((f) => f.endsWith('.feature')).sort();
-  const bases = files.map((f) => f.replace(/\.feature$/, ''));
+  const bases = files.map(featureBase);
 
-  test('step definers map only to existing feature files', () => {
-    const orphaned = Object.keys(definers).filter((k) => !bases.includes(k));
-    assert.deepStrictEqual(orphaned, [], `definers with no matching .feature in ${dir}: ${orphaned.join(', ')}`);
-  });
-
-  for (const file of files) {
-    const base = file.replace(/\.feature$/, '');
+  // Validate and parse EVERYTHING before registering any test: a bad definer
+  // or an unparseable feature must fail at load, before half a suite exists.
+  const features = files.map((file) => {
+    const base = featureBase(file);
     const featureFile = path.join(dir, file);
     const definer = definers[base];
     if (definer !== undefined && typeof definer !== 'function') {
@@ -516,8 +687,23 @@ function runFeatures(dir, definers, opts = {}) {
     const registry = new StepRegistry();
     if (definer) definer(registry);
     const parsed = parseFeature(fs.readFileSync(featureFile, 'utf8'), featureFile);
+    return { base, parsed, registry };
+  });
 
-    test(`${base} :: step definitions are ${wip.has(base) ? 'unambiguous' : 'complete and unambiguous'}`, () => {
+  // The file's one-call slot is consumed HERE, after validation — a call that
+  // threw its documented load-time error (bad definer, unparseable feature)
+  // must not poison the slot: the corrected retry is still the file's first
+  // *registering* call. Registrations start below, so from this point the
+  // call is the one the rule permits.
+  filesWithRunFeatures.add(testFile.key);
+
+  registerTest('step definers map only to existing feature files', {}, () => {
+    const orphaned = Object.keys(definers).filter((k) => !bases.includes(k));
+    assert.deepStrictEqual(orphaned, [], `definers with no matching .feature in ${dir}: ${orphaned.join(', ')}`);
+  });
+
+  for (const { base, parsed, registry } of features) {
+    registerTest(`${base} :: step definitions are ${wip.has(base) ? 'unambiguous' : 'complete and unambiguous'}`, {}, () => {
       const steps = [...parsed.background, ...parsed.scenarios.flatMap((s) => s.steps)];
       const ambiguous = steps
         .filter((s) => registry.steps.filter((d) => s.text.match(d.re)).length > 1)
