@@ -11,16 +11,20 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { composeFrame, updateFeed, run } = require('../src/sidecar.js');
+const { composeFrame, updateFeed, run, heartbeatTick, clearHeartbeat, sidecarAlive } = require('../src/sidecar.js');
 
-// A fully-injected harness for run() so the end-of-session sweep is testable
-// without real timers, process.exit, or stdout writes.
+// A fully-injected harness for run() so the end-of-session sweep and the
+// heartbeat takeover are testable without real timers, process.exit, stdout
+// writes, or heartbeat files in the real state dir.
 function runHarness(over = {}) {
-  const w = { ticks: 0, scheduled: [], cleared: { interval: 0, timeout: 0 }, exited: 0, signals: [] };
+  const w = { ticks: 0, beats: 0, yields: 0, clearedBeat: 0, scheduled: [], cleared: { interval: 0, timeout: 0 }, exited: 0, signals: [] };
   const deps = {
     graceMs: 1500,
     tick: () => { w.ticks++; },
     sentinelExists: () => !!over.sentinel,
+    beat: () => { w.beats++; return over.beat ? over.beat() : 'claimed'; },
+    clearBeat: () => { w.clearedBeat++; },
+    onYield: () => { w.yields++; },
     setIntervalFn: () => 'INTERVAL_ID',
     setTimeoutFn: (cb, ms) => { w.scheduled.push({ cb, ms }); return 'TIMEOUT_ID'; },
     clearIntervalFn: () => { w.cleared.interval++; },
@@ -55,6 +59,96 @@ test('run: without --exit-on-end a session end never self-closes (tmux/standalon
 test('run: --exit-on-end does NOT close while the session is still live', () => {
   const { w } = runHarness({ exitOnEnd: true, sentinel: false });
   assert.strictEqual(w.scheduled.length, 0, 'no sweep until the exited sentinel appears');
+});
+
+test('run: a signal stop clears the heartbeat (the pane is dead for the launcher)', () => {
+  const { w, stop } = runHarness({ exitOnEnd: false, sentinel: false });
+  stop();
+  assert.strictEqual(w.clearedBeat, 1, 'own heartbeat removed on the way out');
+  assert.strictEqual(w.exited, 1);
+});
+
+test('run: a yielded heartbeat folds the pane WITHOUT clearing the newer sidecar\'s claim', () => {
+  const { w } = runHarness({ exitOnEnd: false, beat: () => 'yielded' });
+  assert.strictEqual(w.yields, 1, 'hand-off note painted');
+  assert.strictEqual(w.exited, 1, 'pane folds');
+  assert.strictEqual(w.clearedBeat, 0, 'the heartbeat now belongs to the newer sidecar');
+});
+
+test('run: beats at render cadence while claimed', () => {
+  const { w } = runHarness({ exitOnEnd: false });
+  assert.ok(w.beats >= 1, 'heartbeat written on the first render');
+  assert.strictEqual(w.exited, 0, 'claimed → keeps running');
+});
+
+// --- heartbeat file semantics (single live sidecar per state dir) ----------
+
+test('heartbeatTick: claims an empty state dir and re-claims over an OLDER nonce', () => {
+  const dir = freshStateDir();
+  try {
+    assert.strictEqual(heartbeatTick(dir, '10:2000'), 'claimed');
+    assert.strictEqual(fs.readFileSync(path.join(dir, 'sidecar-alive'), 'utf8'), '10:2000');
+    // A later-started sidecar claims over the earlier one's beat.
+    assert.strictEqual(heartbeatTick(dir, '11:3000'), 'claimed');
+    assert.strictEqual(fs.readFileSync(path.join(dir, 'sidecar-alive'), 'utf8'), '11:3000');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('heartbeatTick: yields to a NEWER nonce and leaves its claim untouched', () => {
+  const dir = freshStateDir();
+  try {
+    heartbeatTick(dir, '11:3000');
+    assert.strictEqual(heartbeatTick(dir, '10:2000'), 'yielded');
+    assert.strictEqual(fs.readFileSync(path.join(dir, 'sidecar-alive'), 'utf8'), '11:3000', 'newer claim not clobbered');
+    // Same start millisecond: the higher pid wins the tie deterministically.
+    assert.strictEqual(heartbeatTick(dir, '10:3000'), 'yielded');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('heartbeatTick: garbage content is claimed over, never wedges the panel', () => {
+  const dir = freshStateDir();
+  try {
+    fs.writeFileSync(path.join(dir, 'sidecar-alive'), 'not a nonce');
+    assert.strictEqual(heartbeatTick(dir, '10:2000'), 'claimed');
+    assert.strictEqual(fs.readFileSync(path.join(dir, 'sidecar-alive'), 'utf8'), '10:2000');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('clearHeartbeat: removes our own claim but never a foreign one', () => {
+  const dir = freshStateDir();
+  const file = path.join(dir, 'sidecar-alive');
+  try {
+    fs.writeFileSync(file, '10:2000');
+    clearHeartbeat(dir, '99:9999');
+    assert.ok(fs.existsSync(file), 'foreign heartbeat left in place');
+    clearHeartbeat(dir, '10:2000');
+    assert.ok(!fs.existsSync(file), 'own heartbeat removed');
+    clearHeartbeat(dir, '10:2000'); // idempotent on a missing file
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('sidecarAlive: fresh beat → attached; stale or missing → dead', () => {
+  const dir = freshStateDir();
+  const file = path.join(dir, 'sidecar-alive');
+  try {
+    assert.strictEqual(sidecarAlive(dir), false, 'no heartbeat file → dead');
+    fs.writeFileSync(file, '10:2000');
+    assert.strictEqual(sidecarAlive(dir), true, 'just-beaten → attached');
+    // A pane killed 10s ago (beats stop; the file goes stale) reads as dead.
+    const tenSecAgo = Date.now() / 1000 - 10;
+    fs.utimesSync(file, tenSecAgo, tenSecAgo);
+    assert.strictEqual(sidecarAlive(dir), false, 'stale heartbeat → dead');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 function freshStateDir() {

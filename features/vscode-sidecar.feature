@@ -51,6 +51,32 @@ Feature: VS Code split-terminal sidecar
     Then a banner with the split steps is printed
     And no Claude process is started
 
+  # Relaunch dedupe: an attached sidecar (fresh heartbeat, see src/sidecar.js)
+  # picks the new session up by itself once the exited sentinel is cleared —
+  # re-prompting the split every launch is what piled up duplicate panes.
+  @AC10
+  Scenario: Relaunching while a sidecar is attached reuses it instead of prompting again
+    Given a live sidecar is already attached to the state dir
+    When I run "ccr"
+    Then a short note says the attached sidecar picks this session up
+    And no split banner is printed
+    And nothing is copied to the clipboard
+
+  @AC10
+  Scenario: A stale heartbeat never suppresses the split banner
+    Given a sidecar heartbeat that stopped beating
+    When I run "ccr"
+    Then a prominent banner shows the split keybinding and the sidecar one-liner
+
+  # Takeover (drives src/sidecar.js run()): even if the user pastes the
+  # one-liner twice, the panes converge to a single live panel.
+  @AC10
+  Scenario: Pasting a second sidecar converges to a single live panel
+    Given a sidecar is running in a pane
+    When a newer sidecar claims the same state dir
+    Then the older pane paints a hand-off note and exits
+    And the newer sidecar's heartbeat is left in place
+
   @AC10
   Scenario: `ccr <profile>` targets the CCS profile state dir
     Given `ccs` is resolvable on PATH

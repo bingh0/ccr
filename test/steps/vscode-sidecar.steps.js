@@ -6,6 +6,7 @@
 const assert = require('node:assert');
 const path = require('node:path');
 const vscode = require('../../src/launch-vscode');
+const sidecar = require('../../src/sidecar');
 
 const OS = { macOS: 'darwin', Windows: 'win32', Linux: 'linux' };
 
@@ -36,6 +37,7 @@ function deps(w) {
     cleanup: (/** @type {string} */ f) => { w.cleaned.push(f); },
     spawnClaude: (/** @type {string} */ bin, /** @type {string[]} */ args) => { w.spawnedClaude = { bin, args }; return { status: 0 }; },
     spawnCopy: (/** @type {string} */ cmd, /** @type {string[]} */ a, /** @type {string} */ input) => { w.copied = (w.copied || []).concat({ cmd, input }); return { status: 0 }; },
+    sidecarAlive: () => !!w.sidecarAlive,
   };
 }
 
@@ -89,4 +91,52 @@ module.exports = function defineVscodeSidecarSteps(reg) {
     assert.ok(w.out.includes(`--state-dir "${expected}"`), w.out);
   });
   reg.define(/^stderr explains the profile was not found$/, (w) => assert.match(w.err, /not found/));
+
+  // Relaunch dedupe: fresh heartbeat → note instead of banner + clipboard.
+  reg.define(/^a live sidecar is already attached to the state dir$/, (w) => { w.sidecarAlive = true; });
+  reg.define(/^a sidecar heartbeat that stopped beating$/, (w) => { w.sidecarAlive = false; });
+  reg.define(/^a short note says the attached sidecar picks this session up$/, (w) => {
+    assert.match(w.out, /already attached/);
+    assert.match(w.out, /picks this session up/);
+  });
+  reg.define(/^no split banner is printed$/, (w) => {
+    assert.ok(!w.out.includes('split your VS Code terminal'), `banner leaked into: ${w.out}`);
+  });
+  reg.define(/^nothing is copied to the clipboard$/, (w) => {
+    assert.strictEqual(w.osc52, false, 'no OSC 52 escape');
+    assert.strictEqual(w.copied, undefined, 'no native copy tool spawned');
+  });
+
+  // Takeover: a second pasted sidecar converges to a single live panel. Drives
+  // src/sidecar.js run() with injected timers/heartbeat, mirroring how the
+  // launcher-side steps above inject launch-vscode's side effects.
+  reg.define(/^a sidecar is running in a pane$/, (w) => {
+    w.pane = { beatResult: 'claimed', yields: 0, exited: 0, clearedBeat: 0, loopCb: null };
+    sidecar.run({
+      exitOnEnd: false,
+      tick: () => {},
+      sentinelExists: () => false,
+      beat: () => w.pane.beatResult,
+      clearBeat: () => { w.pane.clearedBeat++; },
+      onYield: () => { w.pane.yields++; },
+      setIntervalFn: (/** @type {() => void} */ cb) => { w.pane.loopCb = cb; return 'ID'; },
+      setTimeoutFn: () => 'ID',
+      clearIntervalFn: () => {},
+      clearTimeoutFn: () => {},
+      exit: () => { w.pane.exited++; },
+      onSignal: () => {},
+    });
+    assert.strictEqual(w.pane.exited, 0, 'first sidecar is live');
+  });
+  reg.define(/^a newer sidecar claims the same state dir$/, (w) => {
+    w.pane.beatResult = 'yielded'; // the newer nonce now owns the heartbeat
+    w.pane.loopCb();               // next render tick notices
+  });
+  reg.define(/^the older pane paints a hand-off note and exits$/, (w) => {
+    assert.strictEqual(w.pane.yields, 1, 'hand-off note painted');
+    assert.strictEqual(w.pane.exited, 1, 'older pane folded');
+  });
+  reg.define(/^the newer sidecar's heartbeat is left in place$/, (w) => {
+    assert.strictEqual(w.pane.clearedBeat, 0, 'yield never clears the newer claim');
+  });
 };

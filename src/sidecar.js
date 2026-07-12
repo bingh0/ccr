@@ -18,6 +18,79 @@ const { currentTranscriptPath, readNewLines, parseEvents } = require('./transcri
 
 const STATE_DIR = process.env.CCR_STATE_DIR || path.join(os.homedir(), '.ccr');
 
+// Single-instance heartbeat: each live sidecar re-claims <stateDir>/sidecar-alive
+// roughly once a second with a "<pid>:<startMs>" nonce. Two readers use it:
+//  - the VS Code launcher skips the split+paste banner while the file is fresh
+//    (an attached sidecar picks the new session up by itself once the launcher
+//    clears the exited sentinel — see launch-vscode.js), so relaunching stops
+//    minting duplicate panes;
+//  - an older sidecar that sees a NEWER nonce yields its pane (see run()), so
+//    pasting the one-liner twice still converges to a single live panel.
+const HEARTBEAT_FILE = 'sidecar-alive';
+// "Fresh" = beaten within this window. Beats land ~1s apart; 5s tolerates a
+// busy machine without ever mistaking a dead pane (minutes old) for live.
+const HEARTBEAT_FRESH_MS = 5000;
+
+/** @param {string} s @returns {{ pid: number, start: number } | null} */
+function parseNonce(s) {
+  const m = /^(\d+):(\d+)$/.exec(s.trim());
+  return m ? { pid: Number(m[1]), start: Number(m[2]) } : null;
+}
+
+/**
+ * One heartbeat: re-claim the file with our nonce, unless a NEWER sidecar
+ * (later start; higher pid breaks a same-millisecond tie) holds it — then
+ * yield WITHOUT writing, so the newer panel's claim is never clobbered and
+ * exactly one of the two keeps beating. Unreadable or unparseable content is
+ * claimed over (a garbage file must not wedge the panel), and any fs error
+ * claims rather than kills the loop — the heartbeat is strictly best-effort.
+ * @param {string} stateDir @param {string} nonce
+ * @returns {'claimed' | 'yielded'}
+ */
+function heartbeatTick(stateDir, nonce) {
+  const file = path.join(stateDir, HEARTBEAT_FILE);
+  const mine = parseNonce(nonce);
+  try {
+    let cur = '';
+    try { cur = fs.readFileSync(file, 'utf8'); } catch { /* no heartbeat yet */ }
+    const other = cur && cur.trim() !== nonce ? parseNonce(cur) : null;
+    if (other && mine && (other.start > mine.start || (other.start === mine.start && other.pid > mine.pid))) {
+      return 'yielded';
+    }
+    fs.writeFileSync(file, nonce);
+  } catch { /* best-effort */ }
+  return 'claimed';
+}
+
+/**
+ * Remove the heartbeat on the way out — but only while it still holds OUR
+ * nonce; after a takeover the file belongs to the newer sidecar.
+ * @param {string} stateDir @param {string} nonce
+ */
+function clearHeartbeat(stateDir, nonce) {
+  const file = path.join(stateDir, HEARTBEAT_FILE);
+  try {
+    if (fs.readFileSync(file, 'utf8').trim() === nonce) fs.rmSync(file, { force: true });
+  } catch { /* already gone / unreadable — nothing to clear */ }
+}
+
+/**
+ * Is a sidecar attached to this state dir right now? Mtime-based, so a killed
+ * pane (whose stale file nobody cleared) reads as dead within seconds. Used by
+ * the VS Code launcher to print "already attached" instead of the split banner.
+ * @param {string} stateDir @param {{ now?: number, freshMs?: number }} [opts]
+ * @returns {boolean}
+ */
+function sidecarAlive(stateDir, opts = {}) {
+  const now = opts.now != null ? opts.now : Date.now();
+  const freshMs = opts.freshMs != null ? opts.freshMs : HEARTBEAT_FRESH_MS;
+  try {
+    return now - fs.statSync(path.join(stateDir, HEARTBEAT_FILE)).mtimeMs <= freshMs;
+  } catch {
+    return false;
+  }
+}
+
 // Live feed accumulator: tail the current transcript incrementally (by byte
 // offset) and roll up tool/skill events + per-session stats. Reset on session
 // switch. Best-effort — must never break the economy panel.
@@ -165,8 +238,14 @@ function frame() {
  * buildWtArgs) so this RIGHT pane closes first and the border sweeps left→right.
  * Side effects are injectable so the end-sweep is unit-testable.
  *
+ * A second sidecar pasted against the same state dir takes the heartbeat over
+ * (its nonce is newer); this one then paints a hand-off note and exits WITHOUT
+ * clearing the file — it now belongs to the newer panel. `beat`/`clearBeat`/
+ * `onYield` are injectable so the takeover is unit-testable too.
+ *
  * @param {{ exitOnEnd?: boolean, stateDir?: string, graceMs?: number,
  *   tick?: () => void, sentinelExists?: () => boolean,
+ *   beat?: () => ('claimed' | 'yielded'), clearBeat?: () => void, onYield?: () => void,
  *   setIntervalFn?: Function, setTimeoutFn?: Function,
  *   clearIntervalFn?: Function, clearTimeoutFn?: Function,
  *   exit?: () => void, onSignal?: (sig: string, handler: () => void) => void }} [opts]
@@ -180,6 +259,10 @@ function run(opts = {}) {
   const graceMs = opts.graceMs != null ? opts.graceMs : 200;
   const tick = opts.tick || frame;
   const sentinelExists = opts.sentinelExists || (() => fs.existsSync(path.join(stateDir, 'exited')));
+  const nonce = `${process.pid}:${Date.now()}`;
+  const beat = opts.beat || (() => heartbeatTick(stateDir, nonce));
+  const clearBeat = opts.clearBeat || (() => clearHeartbeat(stateDir, nonce));
+  const onYield = opts.onYield || (() => draw(bold('ccr') + '  ' + dim('another sidecar attached — this pane stood down') + '\n'));
   const setIntervalFn = opts.setIntervalFn || setInterval;
   const setTimeoutFn = opts.setTimeoutFn || setTimeout;
   const clearIntervalFn = opts.clearIntervalFn || clearInterval;
@@ -194,11 +277,13 @@ function run(opts = {}) {
   let id = null;
   let endTimer = null;
   let sinceRender = RENDER_MS; // render on the first loop
-  const stop = () => {
+  const teardown = (/** @type {boolean} */ clearHb) => {
     if (id != null) clearIntervalFn(id);
     if (endTimer != null) clearTimeoutFn(endTimer);
+    if (clearHb) clearBeat();
     exit();
   };
+  const stop = () => teardown(true);
   const checkEnd = () => {
     // Once the session has ended, paint it once then sweep this pane closed.
     if (exitOnEnd && endTimer == null && sentinelExists()) {
@@ -208,7 +293,13 @@ function run(opts = {}) {
   };
   const loop = () => {
     sinceRender += pollMs;
-    if (sinceRender >= RENDER_MS) { sinceRender = 0; tick(); }
+    if (sinceRender >= RENDER_MS) {
+      sinceRender = 0;
+      tick();
+      // Beat at render cadence (~1s). A newer sidecar owns the dir now →
+      // hand the state dir over and fold this pane, leaving ITS heartbeat.
+      if (beat() === 'yielded') { onYield(); teardown(false); return; }
+    }
     checkEnd();
   };
   loop();
@@ -220,5 +311,6 @@ function run(opts = {}) {
 
 // `updateFeed` + `composeFrame` are exported for tests (the incremental tail +
 // session-switch reset and the ended/waiting/render states are the subtle
-// parts); the live loop uses `run`.
-module.exports = { run, updateFeed, composeFrame };
+// parts); the live loop uses `run`. The heartbeat trio is exported for tests
+// and for the VS Code launcher's `sidecarAlive` check.
+module.exports = { run, updateFeed, composeFrame, heartbeatTick, clearHeartbeat, sidecarAlive };

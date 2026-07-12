@@ -79,6 +79,13 @@ trigger the split itself, so `ccr` does everything around it:
 Lost the banner once Claude takes the screen? Run `ccr sidecar --hint` to reprint
 the steps and re-copy the command.
 
+The split is a **one-time** setup per VS Code window: an attached sidecar picks
+each new `ccr` session up automatically, so relaunching prints a short note
+instead of the banner. And if you do paste the one-liner into a second pane, the
+older pane stands down by itself — there is never more than one live sidebar per
+session. Profiles stay independent: a personal `ccr` and a work `ccr <profile>`
+run side by side, each with its own state dir and its own sidebar.
+
 On **Windows** this is the default inside VS Code (Windows Terminal otherwise
 opens a separate window, so the in-editor split is nicer). On **Linux/macOS**,
 `ccr` defaults to `tmux` (which works inside the VS Code terminal too); set

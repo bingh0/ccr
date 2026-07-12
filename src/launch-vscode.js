@@ -97,6 +97,21 @@ function copyToClipboard(text, d) {
 }
 
 /**
+ * The quiet replacement for the banner when a sidecar is ALREADY attached to
+ * this state dir (heartbeat fresh — see src/sidecar.js). Relaunching used to
+ * prompt for a new split+paste every time while every old pane on the same
+ * state dir came back to life too, so panes accumulated; an attached sidecar
+ * picks the new session up by itself, so all the user needs is one line.
+ * @param {{ hintCmd: string, color: boolean }} o
+ * @returns {string}
+ */
+function buildAttachedNote(o) {
+  const c = o.color ? (/** @type {string} */ code, /** @type {string} */ s) => `\x1b[${code}m${s}\x1b[0m` : (/** @type {string} */ _code, /** @type {string} */ s) => s;
+  return '\n' + c('1', '  ccr') + c('2', ` · live sidecar already attached — it picks this session up automatically.`)
+    + '\n' + c('2', `        (split steps again: ${o.hintCmd})`) + '\n\n';
+}
+
+/**
  * `ccr [profile]` inside a VS Code integrated terminal: wire the split-view
  * sidecar, then run Claude in the current pane. Returns Claude's exit code.
  * @param {string} [profile]
@@ -136,11 +151,18 @@ function run(profile, deps = {}) {
 
   // Show the split instructions + copy the sidecar one-liner BEFORE Claude takes
   // over the pane (the clipboard + hint make it recoverable once it scrolls off).
+  // Unless a sidecar is already attached to this state dir: it revives on its
+  // own once the exited sentinel is cleared above, and re-prompting the split
+  // every relaunch is exactly what piled up duplicate panes.
   const ccrBin = d.which('ccr');
   const sidecarCmd = sidecarPasteCommand({ stateDir: st.stateDir, ccrBin, node: d.node, ccrJs: d.ccrJs });
   const hintCmd = sidecarPasteCommand({ stateDir: st.stateDir, ccrBin, node: d.node, ccrJs: d.ccrJs, hint: true });
-  d.out(buildBanner({ sidecarCmd, splitKey: splitKeybinding(d.platform), hintCmd, color: d.color }));
-  copyToClipboard(sidecarCmd, d);
+  if (d.sidecarAlive(st.stateDir)) {
+    d.out(buildAttachedNote({ hintCmd, color: d.color }));
+  } else {
+    d.out(buildBanner({ sidecarCmd, splitKey: splitKeybinding(d.platform), hintCmd, color: d.color }));
+    copyToClipboard(sidecarCmd, d);
+  }
 
   // Run Claude in the current pane (blocks until exit). The temp settings file is
   // always removed; the "session ended" sentinel is only dropped if Claude
@@ -260,6 +282,9 @@ function withDefaults(deps) {
     cleanup: deps.cleanup || ((f) => inject.cleanupSettingsFile(f)),
     spawnClaude: deps.spawnClaude || defaultSpawnClaude,
     spawnCopy: deps.spawnCopy || ((cmd, args, input) => require('node:child_process').spawnSync(cmd, args, { input, stdio: ['pipe', 'ignore', 'ignore'] })),
+    // Lazy require: the heartbeat check single-sources file name + freshness in
+    // src/sidecar.js without loading the render stack on the launch path.
+    sidecarAlive: deps.sidecarAlive || ((dir) => require('./sidecar').sidecarAlive(dir)),
   };
 }
 
@@ -283,6 +308,7 @@ function withDefaults(deps) {
  * @property {(file: string) => void} cleanup
  * @property {(bin: string, args: string[]) => {status: number|null, error?: Error}} spawnClaude
  * @property {(cmd: string, args: string[], input: string) => {status: number|null, error?: Error}} spawnCopy
+ * @property {(stateDir: string) => boolean} sidecarAlive
  */
 
-module.exports = { splitKeybinding, sidecarPasteCommand, osc52, buildBanner, copyToClipboard, buildClaudeSpawn, run, hint };
+module.exports = { splitKeybinding, sidecarPasteCommand, osc52, buildBanner, buildAttachedNote, copyToClipboard, buildClaudeSpawn, run, hint };
