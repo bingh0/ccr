@@ -89,16 +89,42 @@ module.exports = function defineSidecarHostingSteps(reg) {
     w.launchSh = fs.readFileSync(path.join(__dirname, '..', '..', 'scripts', 'launch.sh'), 'utf8');
   });
   reg.define(/^it splits the sidebar pane$/, (w) => {
-    assert.match(w.launchSh, /tmux split-window[\s\S]*?sidecar/, 'launcher splits a sidebar pane running the sidecar');
+    assert.match(w.launchSh, /tmux -L "\$SOCKET" split-window[\s\S]*?sidecar/, 'launcher splits a sidebar pane running the sidecar');
   });
   reg.define(/^it captures the new pane id with "-P -F '#\{pane_id\}'" into SIDEBAR_PANE$/, (w) => {
-    assert.match(w.launchSh, /SIDEBAR_PANE="\$\(tmux split-window[\s\S]*?-P -F '#\{pane_id\}'/, 'captures the split pane id into SIDEBAR_PANE');
+    assert.match(w.launchSh, /SIDEBAR_PANE="\$\(tmux -L "\$SOCKET" split-window[\s\S]*?-P -F '#\{pane_id\}'/, 'captures the split pane id into SIDEBAR_PANE');
   });
   reg.define(/^it sets a pane-scoped pane-mode-changed hook that cancels copy-mode only while the pane is in a mode$/, (w) => {
     // pane-scoped (-p) so the Claude pane keeps normal scrollback…
-    assert.match(w.launchSh, /tmux set-hook -p -t "\$SIDEBAR_PANE" pane-mode-changed/, 'pane-scoped pane-mode-changed hook');
+    assert.match(w.launchSh, /tmux -L "\$SOCKET" set-hook -p -t "\$SIDEBAR_PANE" pane-mode-changed/, 'pane-scoped pane-mode-changed hook');
     // …guarded on #{pane_in_mode} so the cancel doesn't recurse, cancelling that pane's copy-mode.
     assert.match(w.launchSh, /if-shell -F '#\{pane_in_mode\}' 'send-keys -t \$SIDEBAR_PANE -X cancel'/, 'guarded copy-mode cancel');
+  });
+
+  // Socket isolation: each instance on its own tmux server. The universal scan
+  // below is the ratchet — a NEW bare `tmux` call (no -L) reintroduces the
+  // shared-server single point of failure, and must fail here, not in review.
+  reg.define(/^it talks to tmux$/, () => {});
+  reg.define(/^it derives a per-instance socket name from the session name$/, (w) => {
+    assert.match(w.launchSh, /^SOCKET="\$SESSION"$/m, 'socket name follows the per-profile session name');
+  });
+  reg.define(/^every tmux invocation names that socket with -L$/, (w) => {
+    /** @type {string[]} */
+    const offenders = [];
+    for (const line of w.launchSh.split('\n')) {
+      if (/^\s*#/.test(line)) continue;
+      // Command positions only: line start, `$(`, or after ; && || — skips
+      // `command -v tmux` and prose like "tmux not found" in messages.
+      for (const m of line.matchAll(/(?:^|[;(]|&&|\|\|)\s*tmux\s+(\S+)/g)) {
+        if (m[1] !== '-L') offenders.push(line.trim());
+      }
+    }
+    assert.deepStrictEqual(offenders, [], 'every tmux invocation must carry -L (per-profile socket)');
+  });
+  reg.define(/^the in-pane teardown kill-session names the same socket$/, (w) => {
+    // Inside the pane command string: single-quoted so the value expands at
+    // launch, exactly like the '$SESSION' beside it.
+    assert.match(w.launchSh, /tmux -L '\$SOCKET' kill-session -t '\$SESSION'/, 'pane teardown targets its own socket');
   });
 
   // Ended (sentinel round-trip)

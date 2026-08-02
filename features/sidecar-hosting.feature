@@ -54,3 +54,17 @@ Feature: Live sidecar hosting
     When it splits the sidebar pane
     Then it captures the new pane id with "-P -F '#{pane_id}'" into SIDEBAR_PANE
     And it sets a pane-scoped pane-mode-changed hook that cancels copy-mode only while the pane is in a mode
+
+  Scenario: Concurrent profiles are isolated on per-profile tmux sockets
+    # All instances used to share the default tmux server — a single point of
+    # failure. One kill-server (2026-08-02: an agent inside one instance ran
+    # exactly that as post-verification "cleanup"), one crash, one cgroup
+    # teardown killed every concurrent profile at once; and root-table
+    # bindings like F2 were server-global, so the last launch stole the
+    # hotkey for all instances. Each instance now runs its own tmux server,
+    # bounding any failure's blast radius to one profile.
+    Given the tmux launcher script scripts/launch.sh
+    When it talks to tmux
+    Then it derives a per-instance socket name from the session name
+    And every tmux invocation names that socket with -L
+    And the in-pane teardown kill-session names the same socket

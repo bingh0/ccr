@@ -12,6 +12,8 @@
 # state dirs keep concurrent profiles from colliding.
 #
 # Env overrides: CC_BIN, CCR_SESSION, CCR_STATE_DIR, CCR_SIDEBAR_PCT (default 34).
+# The tmux socket name follows the session name — each instance runs its own
+# tmux server, so `tmux ls` won't list ccr sessions (`tmux -L ccr-<profile> ls`).
 
 set -euo pipefail
 
@@ -56,6 +58,16 @@ else
   STATE="${CCR_STATE_DIR:-$HOME/.ccr}"
 fi
 
+# Every instance gets its OWN tmux server, on a socket named after the session
+# (-L puts it under /tmp/tmux-$UID/). On a shared server, one server death —
+# a kill-server (2026-08-02: an agent inside one instance ran exactly that as
+# "cleanup" after a config parse check), a crash, a cgroup teardown — takes
+# down every concurrent profile at once; and root-table bindings like F2 are
+# server-global, so the last launch would steal the hotkey for all instances.
+# Isolation costs one visible thing: `tmux ls` won't list ccr sessions —
+# use `tmux -L ccr-<profile> ls`.
+SOCKET="$SESSION"
+
 mkdir -p "$STATE"
 chmod 700 "$HOME/.ccr" "$STATE" 2>/dev/null || true
 rm -f "$STATE/exited"
@@ -69,17 +81,19 @@ trap 'rm -f "$RUN_CONF"' EXIT
 cp "$REPO/sidecar/ccr.tmux.conf" "$RUN_CONF"
 
 # Clean re-launch.
-tmux kill-session -t "$SESSION" 2>/dev/null || true
+tmux -L "$SOCKET" kill-session -t "$SESSION" 2>/dev/null || true
 
 ENV_PREAMBLE="export CCR_STATE_DIR='$STATE'"
 
 # Pane 0: claude/ccs with --settings. On exit, drop the sentinel then close.
-tmux new-session -d -s "$SESSION" \
-  "$ENV_PREAMBLE; $CC_CMD --settings '$SETTINGS'; touch '$STATE/exited'; sleep 2; tmux kill-session -t '$SESSION' 2>/dev/null"
-tmux set-environment -t "$SESSION" CCR_STATE_DIR "$STATE"
+# Capture its pane id: the F2 hotkey below must target %N, never a relative
+# index (see the binding comment further down).
+CLAUDE_PANE="$(tmux -L "$SOCKET" new-session -d -P -F '#{pane_id}' -s "$SESSION" \
+  "$ENV_PREAMBLE; $CC_CMD --settings '$SETTINGS'; touch '$STATE/exited'; sleep 2; tmux -L '$SOCKET' kill-session -t '$SESSION' 2>/dev/null")"
+tmux -L "$SOCKET" set-environment -t "$SESSION" CCR_STATE_DIR "$STATE"
 
 # Pane 1: the live economy sidebar. Capture its pane id so we can scope a hook to it.
-SIDEBAR_PANE="$(tmux split-window -t "$SESSION:0" -h -p "${CCR_SIDEBAR_PCT:-34}" -P -F '#{pane_id}' \
+SIDEBAR_PANE="$(tmux -L "$SOCKET" split-window -t "$SESSION:0" -h -p "${CCR_SIDEBAR_PCT:-34}" -P -F '#{pane_id}' \
   "$ENV_PREAMBLE; \"$NODE\" \"$REPO/bin/ccr.js\" sidecar; read -r -p 'sidebar exited — Enter to close '")"
 
 # The sidebar is a live dashboard — there is nothing to scroll. A stray mouse-wheel
@@ -91,10 +105,22 @@ SIDEBAR_PANE="$(tmux split-window -t "$SESSION:0" -h -p "${CCR_SIDEBAR_PCT:-34}"
 # re-fires this hook with pane_in_mode=0, so the guard stops it recursing. Best-effort:
 # pane-scoped hooks need tmux >= 3.2; older tmux just skips the guard (|| true).
 if [ -n "$SIDEBAR_PANE" ]; then
-  tmux set-hook -p -t "$SIDEBAR_PANE" pane-mode-changed \
+  tmux -L "$SOCKET" set-hook -p -t "$SIDEBAR_PANE" pane-mode-changed \
     "if-shell -F '#{pane_in_mode}' 'send-keys -t $SIDEBAR_PANE -X cancel'" 2>/dev/null || true
 fi
 
-tmux select-pane -t "$SESSION:0.0"
-tmux source-file -t "$SESSION" "$RUN_CONF"
-tmux attach -t "$SESSION"
+# F2 → /clear: the one hotkey ccr ships. The text is a CONSTANT in this script —
+# never configuration, never a prompt file, never blob content (the pane
+# subsystem has no path to a key binding at all; docs/PANE-CONTRACT.md). It
+# targets the pane id captured above, because a relative index like `.0`
+# retargets after any split or swap. confirm-before makes a stray F2 cost one
+# keypress rather than a whole context. If no pane id came back (a tmux too old
+# for `new-session -P`), NO hotkey is bound — never an approximate target.
+if [ -n "$CLAUDE_PANE" ]; then
+  printf "bind-key -n F2 confirm-before -p 'send /clear to Claude? (y/n) ' \"send-keys -t %s '/clear' Enter\"\n" \
+    "$CLAUDE_PANE" >> "$RUN_CONF"
+fi
+
+tmux -L "$SOCKET" select-pane -t "$SESSION:0.0"
+tmux -L "$SOCKET" source-file -t "$SESSION" "$RUN_CONF"
+tmux -L "$SOCKET" attach -t "$SESSION"
