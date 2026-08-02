@@ -1,13 +1,23 @@
 # Tool: ccr sidecar — external tool panes rendered from pane blobs
 # Contract: docs/PANE-CONTRACT.md (v1)  |  Golden fixture: docs/pane-blob.golden.json
-# Prior art: treecontext-mcp wrapper (blob-and-renderer seam, pager, F2/F3)
-# ccr reads a blob FILE listed in user config and renders a full-height pane.
-# The whole acquisition path is "safely read bytes from a configured path":
-# no subprocess, no database, no knowledge of the producing tool. Blob strings
-# are UNTRUSTED display data — stripped of control bytes before any render
-# (the src/sanitize.js invariant transcripts already pin). Honesty rules flow
-# through: dark survives distinctly, broken confesses, age is always shown,
-# error states recover, and a configured pane never silently disappears.
+# ccr reads a blob FILE listed in user config, VALIDATES it against the contract,
+# and renders a full-height pane. The whole acquisition path is "safely read bytes
+# from a configured path": no subprocess, no database, no producer code, no
+# knowledge of the producing tool. Blob strings are UNTRUSTED display data —
+# stripped of control bytes before any render (the src/sanitize.js invariant
+# transcripts already pin). Honesty rules flow through: dark survives distinctly,
+# broken confesses, age is always shown, error states recover, and a configured
+# pane never silently disappears from the cycle.
+#
+# @security marks the scenarios that hold the trust boundary rather than the
+# look of the pane. They are gate-mandatory: once their steps land they must
+# bind and pass even while the rest of this feature sits in `wip`
+# (test/features.test.js), and they may never carry @skip or @todo. The gate
+# (test/security-tags.test.js) lands together with the step bindings — a gate
+# that `wip` can switch off is not a gate, so it is written to ignore `wip`.
+# The T2 invariants — the sidecar's module graph importing no child_process and
+# no network builtin, and never reading stdin — are structural rather than
+# behavioural, and are pinned in test/sidecar-capabilities.test.js.
 
 Feature: External tool panes from pane blobs
   As a user running agent tooling beside a Claude session
@@ -19,12 +29,14 @@ Feature: External tool panes from pane blobs
 
   # --- Discovery: configuration, never convention ---
 
+  @security
   Scenario: A pane exists only because configuration names its blob path
     Given no other blob paths are configured
     When the sidecar starts
     Then exactly one external pane joins the view cycle
     And the sidecar reads no path it was not given
 
+  @security
   Scenario: Acquisition is safely reading the configured file and nothing else
     Given a valid v1 blob at the configured path
     When the pane renders
@@ -86,6 +98,7 @@ Feature: External tool panes from pane blobs
 
   # --- Untrusted strings: blob bytes never become terminal control ---
 
+  @security
   Scenario: Control bytes in blob strings render as inert text
     Given a v1 blob whose title, labels, values, details, and message embed escape and control bytes
     When the pane renders
@@ -93,11 +106,50 @@ Feature: External tool panes from pane blobs
     And the terminal receives no escape sequence originating from blob content
     And the clipboard, window title, and pane chrome are untouched by the blob
 
-  Scenario: An overlong field is clamped to its cell, chrome intact
+  @security
+  Scenario: An overlong field is clamped to its cell, never costing the pane
     Given a valid v1 blob with a detail of four hundred lines
     When the pane renders
     Then the detail renders clamped to its single-line cell
     And the basis and age chrome remain visible
+    And the pane does not fall back to an error state
+
+  # --- The verifier: one choke point, one named failure ---
+
+  @security
+  Scenario: A blob missing a required field is the named invalid state
+    Given a blob at the configured path that parses as JSON but carries no basis
+    When the pane renders
+    Then the pane shows an invalid state naming the configured path
+    And no byte of the file's content appears in the pane
+    And the invalid state is visibly distinct from the unreadable and waiting states
+
+  @security
+  Scenario: A broken blob with no message is invalid, never a silent healthy render
+    Given a blob with status "broken" whose message is absent
+    When the pane renders
+    Then the pane shows the invalid state
+    And no rows from that blob are rendered
+
+  @security
+  Scenario: A blob carrying a prototype key cannot reach the rendered object
+    Given a valid v1 blob that also carries a "__proto__" key at the top level and in a row
+    When the pane renders
+    Then the pane renders exactly as it does for the same blob without those keys
+    And no property of any shared prototype has been altered
+
+  @security
+  Scenario: A malformed blob costs a pane state, never the sidecar
+    Given the file at the configured path is malformed in a way that fails validation
+    When the sidecar ticks three times
+    Then all three ticks complete on schedule
+    And the economy view still renders in the cycle
+
+  Scenario: A non-finite spark value drops the sparkline, not the row
+    Given a valid v1 blob with a row whose spark carries a value that parses to infinity
+    When the pane renders
+    Then that row renders without a sparkline
+    And the row's label, value, and status render normally
 
   # --- Forward compatibility ---
 
@@ -121,24 +173,35 @@ Feature: External tool panes from pane blobs
     Then the pane shows a waiting state naming the configured path
     And the pane is not skipped from the view cycle
 
+  @security
   Scenario: An unreadable blob is a named state that shows no file content
     Given the file at the configured path is not parseable JSON this tick
     When the pane renders
     Then the pane shows an unreadable state naming the path
     And no byte of the file's content appears in the pane
 
+  @security
   Scenario: A blob that cannot be read is distinct from one not yet written
     Given the configured path exists but cannot be read as a regular file
     When the pane renders
     Then the pane shows a cannot-read state naming the path and the reason class
     And the state is visibly distinct from the waiting state
 
+  @security
   Scenario: A special file at the blob path never blocks the loop
     Given the configured path is a pipe that never yields bytes
     When the sidecar ticks three times
     Then all three ticks complete on schedule
     And the pane shows the cannot-read state
 
+  @security
+  Scenario: A symlink at the blob path is refused, never followed
+    Given the configured path is a symlink pointing at another file
+    When the pane renders
+    Then the pane shows the cannot-read state naming the path
+    And the sidecar never opens the symlink's target
+
+  @security
   Scenario: An oversized blob is refused by name
     Given a blob file larger than the size cap
     When the pane renders
@@ -164,51 +227,51 @@ Feature: External tool panes from pane blobs
     When the next tick renders
     Then the pane shows the healthy view
 
-  # --- Action keys: host-configured, never blob-driven ---
+  # --- Hotkeys: a host capability, defined by ccr's code, never by a pane ---
 
-  Scenario: A configured action key types its text literally with one submit
-    Given the sidecar configuration maps a key to a prompt file containing three lines
-    When the key is pressed
-    Then the three lines are typed into the Claude pane as one space-joined literal line
+  Scenario: A host hotkey types text defined by ccr's code, not by configuration
+    Given the tmux host binds ccr's clear hotkey
+    And the configuration names which key it is but supplies no text
+    When the key is pressed and confirmed
+    Then the text typed into the Claude pane is the constant from ccr's source
+    And no word of it is interpreted as a key name
     And exactly one submit follows
-    And no word of the prompt is interpreted as a key name
 
-  Scenario: A prompt file that other principals can write is rejected at config load
-    Given the sidecar configuration maps a key to a group-writable prompt file
-    When the configuration loads
-    Then the key binding is refused with a visible notice naming the file
-    And pressing the key types nothing
-
-  Scenario: A prompt file inside a blob directory or working tree is rejected
-    Given the sidecar configuration maps a key to a prompt file under a configured blob's directory
-    When the configuration loads
-    Then the key binding is refused with a visible notice
-    And pressing the key types nothing
-
+  @security
   Scenario: Keystrokes target the captured Claude pane id, not an index
     Given the Claude pane's id was captured at launch
     And the panes have since been rearranged
-    When a configured action key is pressed
+    When a host hotkey is pressed and confirmed
     Then the text is typed into the originally captured Claude pane
     And no other pane receives any keystroke
 
-  Scenario: A vanished Claude pane makes the key refuse, not retarget
+  @security
+  Scenario: A vanished Claude pane makes the key do nothing, not retarget
     Given the captured Claude pane no longer exists
-    When a configured action key is pressed
+    When a host hotkey is pressed
     Then nothing is typed anywhere
-    And a visible notice says the Claude pane is gone
 
-  Scenario: A destructive action key requires confirmation
-    Given the sidecar configuration maps a key to the destructive text "/clear"
+  @security
+  Scenario: A destructive hotkey requires confirmation
+    Given the tmux host binds ccr's clear hotkey
     When the key is pressed once
     Then nothing is typed and a confirmation prompt appears
-    When the confirmation key is pressed
-    Then the literal text "/clear" is typed into the Claude pane with one submit
+    When the confirmation is declined
+    Then nothing is typed into the Claude pane
 
-  Scenario: Blob content can never cause input injection
+  @security
+  Scenario: A host with no captured pane id has no hotkeys at all
+    Given a host where no Claude pane id was captured at launch
+    When the session comes up
+    Then no hotkey is bound
+    And no approximate target is substituted for the captured pane id
+
+  @security
+  Scenario: Blob content can never propose, label, or bind a hotkey
     Given a valid v1 blob that also carries an action-like field naming a key and a command
-    When the pane renders and every configured key is pressed
+    When the pane renders and every bound key is pressed
     Then the blob's action-like field is ignored and displayed nowhere
+    And the pane shows no label claiming a key exists
     And nothing from the blob is ever typed into the Claude pane
 
   # --- The pane surface: full-height views, cycled ---

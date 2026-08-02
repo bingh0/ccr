@@ -2,8 +2,9 @@
 
 The ccr sidecar can host **external tool panes**: full-height views rendered
 from small JSON blobs that other tools write beside their own artifacts. ccr
-reads the file and renders it — that is the entire acquisition path. No
-subprocess, no database, no schema knowledge of the producing tool.
+reads the file, validates it against this contract, and renders it — that is
+the entire acquisition path. No subprocess, no database, no producer code, no
+schema knowledge of the producing tool.
 
 This is the durable seam recovered from the original wrapper sidecar: a pure
 renderer over a normalized status blob. The part that did not survive — the
@@ -13,11 +14,11 @@ drain, a run) and dropping it as a file.
 
 ```
 tool's own artifact dir                      ccr sidecar
-┌───────────────────────┐   user config     ┌──────────────────────┐
-│ .gherkin-trace/       │   lists paths     │ read file bytes      │
-│   sidecar.json  ──────┼──────────────────►│ sanitize · render    │
-│ (written atomically   │                   │ (style cycle, chrome)│
-│  by the tool itself)  │                   └──────────────────────┘
+┌───────────────────────┐   user config     ┌──────────────────────────┐
+│ .gherkin-trace/       │   lists paths     │ read file bytes          │
+│   sidecar.json  ──────┼──────────────────►│ verify · sanitize · draw │
+│ (written atomically   │                   │ (style cycle, chrome)    │
+│  by the tool itself)  │                   └──────────────────────────┘
 └───────────────────────┘
 ```
 
@@ -25,7 +26,44 @@ tool's own artifact dir                      ccr sidecar
 exists; ccr never guesses paths. The human wires the join, exactly like Claude
 Code's `statusLine` wiring. Neither side takes a dependency on the other.
 
-## Trust model
+## Threat model
+
+The pane subsystem sits in the same terminal as an agent session that can run
+commands. Two threats follow, and only one of them is containable by rules
+written inside the renderer.
+
+**T1 — hostile input.** The blob file and anything that flows into it. ccr's
+own code is intact; the bytes are not. Fully containable — the rest of this
+section, plus [the verifier](#the-verifier), is how.
+
+**T2 — hostile renderer.** The rendering code itself is attacker-controlled: a
+producer-shipped renderer module, a compromised dependency, a supply-chain
+hit. **No rule inside the renderer survives T2** — the attacker rewrites the
+rules, and nothing in Node stops that process reattaching to the multiplexer
+socket at its predictable path. T2 is therefore contained *structurally*, by
+ccr never executing code it did not ship. The blob is data, permanently (see
+[Non-goals](#non-goals-v1)), and the renderer holds no capability it does not
+need in order to draw.
+
+### Structural invariants (T2)
+
+The pane subsystem runs inside `src/sidecar.js`, whose entire module graph
+imports exactly three Node builtins: `fs`, `path`, `os`. That is the security
+property, and it is gate-enforced rather than merely observed:
+
+- **No process capability.** Nothing reachable from `src/sidecar.js` imports
+  `child_process` or any network builtin (`net`, `http`, `https`, `dgram`,
+  `tls`). The renderer cannot exec and cannot connect.
+- **No input channel.** The sidecar never reads stdin. Terminal-response
+  channels and echoed keystrokes are structurally dead rather than filtered.
+- **No foreign code.** No path from configuration, a blob, or a producer is
+  ever `require`d. A pane is data all the way down.
+
+These are asserted against the module graph itself, so they hold even if every
+line of rendering logic beneath them is rewritten — which is exactly what a
+behavioural test cannot promise.
+
+### Untrusted strings (T1)
 
 **Every blob string field is untrusted display data.** The blob is a
 filesystem object writable by anything running as the user, in a directory a
@@ -38,12 +76,20 @@ ccr renders blob strings as **inert text, never as terminal control**:
 - **Display fields** — `tool`, `title`, `basis.label`, `basis.at`,
   `message`, row `label`, `value`, `detail` — are stripped of all C0/C1
   control bytes, DEL, and escape sequences before rendering (the
-  `src/sanitize.js` invariant already pinned for transcripts), then rendered
-  into width-clamped single-line cells. No blob byte may reach the terminal
-  uninterpreted — this closes output spoofing, OSC 52 clipboard writes,
-  title-report keystroke escalation, and chrome forgery in one rule.
-- Error states (unreadable, oversized, cannot-read) name the **path only** —
-  never file bytes, never parser messages that quote content.
+  `src/sanitize.js` invariant already pinned for transcripts), then truncated
+  to 512 chars and clamped into width-limited single-line cells. No blob byte
+  may reach the terminal uninterpreted — this closes output spoofing, OSC 52
+  clipboard writes, title-report keystroke escalation, and chrome forgery in
+  one rule.
+- Error states (invalid, unreadable, unsupported version, oversized,
+  cannot-read) name the **path only** — never file bytes, never parser
+  messages that quote content.
+
+**Sanitizing bytes does not make claims true.** A conforming blob still
+authors its own text, and may render `fence · clean · ok` while lying. Nothing
+here fixes that; the required chrome — `tool`, `basis`, and the file's write
+age — is what bounds the lie by making it attributable and dateable. That is
+why all three are mandatory rather than decorative.
 
 ## Stability promise
 
@@ -101,8 +147,13 @@ Field rules:
   must derive from the producer's current data (e.g. a density
   distribution), never from cross-run history — history accumulation
   breaks producer determinism over unchanged sources.
-- Size caps: a blob over **256 KB**, over 256 rows, or with any display
-  field over 512 chars renders the named "oversized" state (path only).
+- Size caps are **resource** limits: a blob file over **256 KB**, or one
+  carrying over **256 rows**, renders the named "oversized" state (path
+  only). An over-long *display field* is **not** an oversize condition — it
+  is truncated to 512 chars and clamped to its cell (see Trust model).
+  Letting one long string blank the whole pane would hand anyone who can
+  influence a single label a denial-of-display primitive; clamping costs a
+  cell, refusing costs the pane.
 
 ### The row status enum — closed, five values
 
@@ -121,7 +172,57 @@ Field rules:
 "cannot tell" and have it survive into the pane, visibly distinct from both
 health and intentional absence. **An unrecognized row status renders as
 `dark`** — never green, never dropped. A top-level `status` that is neither
-`ok` nor `broken` renders the unsupported-blob state.
+`ok` nor `broken` fails validation and renders the invalid state.
+
+## The verifier
+
+Between the file bytes and any renderer sits **one choke point** that turns a
+byte string into either a validated v1 blob or a single named failure. No
+renderer ever sees unvalidated input — the same discipline `src/sanitize.js`
+already applies at ccr's other ingestion points.
+
+The pipeline, in order:
+
+1. **Size-capped read** (see [consumer obligations](#ccr-consumer-obligations))
+   — `lstat`, regular file only, byte cap enforced before the read completes.
+2. **`JSON.parse`** — any throw is the `unreadable` state.
+3. **Shape validation** — this section.
+4. **`stripControl`** on every display string — validation checks *shape*,
+   never bytes, so sanitizing must come after it and must be unconditional.
+5. **Truncate to 512 chars, then clamp to the cell.**
+
+Validation rules:
+
+- **Whitelist-construct, never mutate.** The validated blob is a *fresh*
+  object built by reading only the fields v1 names. The parsed input is never
+  spread, `Object.assign`ed, or otherwise merged into a result — that is the
+  prototype-pollution path, and it is the one injection-style attack a JSON
+  consumer in Node hands out for free.
+- **Total function, never throws.** Validation returns a result; it does not
+  raise into the draw loop. A blob that crashes the pane every tick takes the
+  burn-rate display down with it, because the sidebar is one pane — a
+  malformed file must cost a pane state, never the sidecar.
+- **Types are checked, not coerced.** `v` an integer; `tool`, `title`,
+  `status`, `basis.label`, `basis.at` strings; `rows` an array; each row's
+  `label`, `value`, `status` present and of type. `spark` is the exception,
+  because it is decoration: entries must be **finite** numbers (`1e400` has
+  no JSON literal but still parses to `Infinity`) to *render*, but a
+  non-conforming spark is a **local** failure — the row draws without its
+  sparkline (the field rule above) rather than invalidating the blob. Like
+  clamping an overlong field, a decoration never costs more than itself.
+- **One named failure.** Every shape violation — a missing required field,
+  `rows` not an array, a row without a `value`, a top-level `status` outside
+  the enum, `status: "broken"` with no non-empty `message` — renders the
+  single **`invalid`** pane state, naming the configured path and nothing
+  else. This is deliberately one state rather than a taxonomy: a taxonomy
+  invites error text that quotes the input.
+- **Unknown fields are dropped, not rejected** — the forward-compatibility
+  promise above. Dropping falls out of whitelist construction for free.
+
+`invalid` is distinct from `unreadable` (JSON did not parse), from
+`unsupported version` (`v` parsed, ccr does not know it), and from
+`cannot-read` (the file could not be opened as a regular file). A reader
+seeing `invalid` knows the producer wrote something well-formed and wrong.
 
 ## Producer obligations
 
@@ -168,9 +269,9 @@ health and intentional absence. **An unrecognized row status renders as
    Xd`. ccr never parses `basis.at`. A pane without age chrome manufactures
    currency.
 4. **Absence is a named state** — no file yet (waiting), unreadable JSON,
-   unsupported `v`, cannot-read, oversized: each its own labelled pane
-   state, each naming the configured path (only). A configured pane never
-   silently disappears from the cycle.
+   invalid shape, unsupported `v`, cannot-read, oversized: each its own
+   labelled pane state, each naming the configured path (only). A configured
+   pane never silently disappears from the cycle.
 5. **Recovery is immediate** — a pane in any error/waiting state renders the
    healthy view on the next tick after the blob becomes valid. Error states
    are never sticky.
@@ -186,44 +287,74 @@ health and intentional absence. **An unrecognized row status renders as
    status among the hidden rows (worst = alert > dark > warn > ok > off).
    A hidden `dark` row must still be visible as darkness.
 
-## Action keys (F2/F3-style)
+## Hotkeys are a host capability, never a pane capability
 
-The wrapper's hotkeys — F2 sending `/clear`, F3 typing an orientation prompt
-into the Claude pane — return as a **host capability**, configured beside the
-pane paths. The trust rule: **the text a key injects, and the label a key
-displays, come from user-authored configuration only.**
+The wrapper's hotkeys — F2 sending `/clear` to the Claude pane — return, but
+they live **in the launcher, outside the renderer**. Typing into the agent's
+pane is the single most dangerous capability in this system, and rendering
+does not require it. Keeping the two apart is what makes the structural
+invariants above true: the moment the sidecar owns a hotkey it must read
+stdin and exec `send-keys`, and it gains exactly the two capabilities it now
+provably lacks.
 
-- ccr config maps a key to either a literal string or a **prompt file
-  path**. Prompt files are resolved and validated at config load: they must
-  be regular files, owner-writable only (group/world-writable or symlinked
-  files are rejected), and must NOT live under any configured blob's
-  directory or inside a repository working tree — a repo-local prompt file
-  would let anyone who can merge a PR type into the agent session.
-  (Ruled 2026-08-01: user-config-dir-only is the default and the contract;
-  a per-path repo-local opt-in is DEFERRED until someone actually wants a
-  non-default prompt badly enough to ask.)
-- Injection semantics are pinned: the text is typed **literally** (never
-  interpreted as key names), newlines flattened to spaces, exactly one
-  submit keypress at the end — the `inject-orient.sh` discipline, now
-  normative.
-- The target is the Claude pane's **pane id captured at launch** (`%N`),
-  never a relative index like `.0` (which retargets after any split or
-  swap). If that pane is gone, the key refuses with a visible notice
-  instead of typing into whatever took its place.
-- **Destructive actions are confirm-gated.** A key whose text is `/clear`
-  (or any text the user marks destructive in config) requires a
-  confirmation keypress; a stray F2 must not be the most expensive
-  keystroke in the system.
-- **Blobs never carry injectable content.** The blob is display-only: any
-  action-like field in a blob is ignored, never bound, never displayed as
-  an action label.
+**The trust rule: configuration chooses the key; ccr's own code chooses the
+text.**
+
+- **The text is a compile-time constant.** No prompt files, no configurable
+  strings, no path resolution, no permission checks, no working-tree
+  heuristics — that entire validation surface is never built, and so cannot
+  be got wrong. The full set of hotkeys is readable in ccr's source.
+- **Configuration may enable, disable, or rebind *which* key** — a selection
+  from a closed set. It may never supply or alter *what is typed*.
+- **The launcher binds; the renderer never participates.** For the tmux host
+  the binding is appended to ccr's own per-session run conf at launch
+  (`scripts/launch.sh`), and tmux performs the keystroke. `src/sidecar.js`
+  reads no key and sends none.
+- **Target the pane id captured at launch** (`%N`), never a relative index
+  like `.0`, which silently retargets after any split or swap. If the
+  captured pane is gone, the key does nothing rather than typing into
+  whatever took its place.
+- **Destructive keys are confirm-gated.** `/clear` discards context; a stray
+  F2 must not be the most expensive keystroke in the system. On tmux this is
+  `confirm-before`, so the gate costs no ccr code.
+- **Injection semantics** (for any host that gains keys later): text typed
+  literally, never interpreted as key names; newlines flattened to spaces;
+  exactly one submit keypress.
+
+**Host scope (v1): tmux only.** `src/launch-win.js` and `src/launch-vscode.js`
+have no key path at all — Windows Terminal bindings would mean editing the
+user's own `settings.json`, and VS Code's integrated terminal offers no
+pane-injection mechanism. Those hosts render panes and bind nothing. A host
+without a captured pane id has no hotkeys; it does not get an approximate one.
+
+### Blobs can never propose, label, or bind a key
+
+Not "blob-supplied actions are validated" — **there is no path from blob
+content to a key binding at all.** A blob cannot bind a key, cannot suggest
+one, cannot render a label claiming one exists. Any action-like field is
+dropped by whitelist construction and displayed nowhere.
+
+This is not an extra restriction; it is what makes the contract
+self-consistent. [Non-goals](#non-goals-v1) already says ccr never triggers
+the producer — a blob-proposed hotkey would have contradicted it. A producer
+that wants a refresh gets the honest version: the pane shows its age, and the
+human or their agent runs the producing command themselves.
 
 ## Non-goals (v1)
 
-- Whole-pane bespoke layouts (the wrapper's `tree-art`) cannot be expressed
-  in rows. If field use demands them, the path is renderer modules shipped by
-  producers (the wrapper's plugin model) *behind this same blob* — additive,
-  no v-bump.
+- **PERMANENT FENCE — producer code never runs in ccr's process.** Not in
+  v1, not behind a flag, not as an opt-in later. No renderer modules, no
+  plugins, no `require` of any producer-supplied path. This is the entire
+  containment for T2: every other rule in this document is written by the
+  renderer and therefore worthless the moment the renderer is not ours. The
+  blob is data, and data is the whole interface.
+
+  The cost is real and accepted: whole-pane bespoke layouts (the wrapper's
+  `tree-art`) cannot be expressed in rows and are therefore out — for good,
+  not for now. A producer wanting a richer view has one route, which is to
+  propose an additive *data* shape here (new optional fields, ignorable by
+  older ccr) that ccr's own renderer draws. Expressiveness is negotiated in
+  this document; it is never delegated to the producer's code.
 - ccr never triggers the producer. A stale blob is displayed as stale; the
   human or their agent decides to re-run the producing step. (For
   gherkin-trace this is contractual: reads must never acquire side effects.)
@@ -241,3 +372,26 @@ displays, come from user-authored configuration only.**
   discretion. Conformance is pinned in its `features/design/` tier.
 - Producer (planned): `treecontext` — blob beside its store; basis moment to
   be ruled by its own contract (hook-drain time is the candidate).
+
+## Ruling log
+
+**2026-08-01** — confirm-gate stands; prompt files resolved from the user
+config dir only, with a per-path repo-local opt-in deferred; gt's row
+inventory as drafted.
+
+**2026-08-02** — threat model tightened: *assume the renderer is hostile.*
+
+- **Supersedes the prompt-file ruling above.** Configurable injected text is
+  gone entirely rather than validated more carefully — no prompt files, no
+  literal strings from config, and so no permission checks, path resolution,
+  or working-tree heuristics to get wrong. Configuration chooses which key;
+  ccr's code chooses the text. The deferred repo-local opt-in is moot.
+- Hotkeys move out of the renderer into the launcher, keeping the sidecar's
+  structural invariants (no exec, no network, no stdin) true. Host scope is
+  tmux only in v1.
+- Producer-shipped renderer modules become a **permanent fence** rather than
+  a deferred v2 option — that fence is the whole containment for T2.
+- A verifier is required between bytes and every renderer, collapsing all
+  shape failures into one named `invalid` state.
+- An over-long display field clamps; it no longer voids the pane as an
+  oversize condition (that would have been a denial-of-display primitive).
