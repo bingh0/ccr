@@ -27,3 +27,9 @@ Thumbs.db
 
 # local agent / tooling state (per-user; never shipped)
 .claude/
+
+# personal scratch — never commit (RELEASE-RUNBOOK.md says so itself)
+FORK-CONTRIBUTOR-GUIDE.md
+RELEASE-RUNBOOK.md
+pr-body.md
+ccr-win-fix-*.patch
