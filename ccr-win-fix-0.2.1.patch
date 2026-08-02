@@ -1,0 +1,447 @@
+From 403661bc7be2c99da38afd6f19b8e82fc6e3b795 Mon Sep 17 00:00:00 2001
+From: Bing Ho <bingh0@users.noreply.github.com>
+Date: Thu, 25 Jun 2026 22:54:22 -0500
+Subject: [PATCH] fix(win): reuse current window + sweep panes closed on exit
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Two regressions in the 0.2.0 Windows Terminal launcher vs. the intended
+(tmux-matching) behavior:
+
+1. `ccr` opened a SECOND window: `wt.exe new-tab` with no `-w` always spawns a
+   new window. Add `-w 0` so it reuses the CURRENT Windows Terminal window.
+
+2. On exit the sidecar lingered on "session ended": panes ran under `cmd /k`
+   (kept open) and `ccr sidecar` looped forever. Switch both panes to `cmd /c`
+   and add `ccr sidecar --exit-on-end`, which shows "session ended" briefly then
+   exits — so both panes sweep closed on session end, mirroring the tmux
+   launcher's `touch exited; sleep 2; kill-session`.
+
+- sidecar.run() gains an injectable, flag-gated end-sweep (Linux/tmux and
+  standalone `ccr sidecar` are unchanged — they never pass --exit-on-end).
+- bin/ccr.js: parse `--exit-on-end`, thread it to sidecar.run().
+- Tests: updated wt-args (-w 0, cmd /c, --exit-on-end) across unit + Gherkin
+  steps; new run() end-sweep unit tests. 260 pass.
+
+NEEDS WINDOWS VERIFICATION (untestable on Linux): that `wt -w 0` targets the
+current window as intended, and the cmd /c sweep closes both panes cleanly.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ bin/ccr.js                          | 10 ++++--
+ features/wt-args-builder.feature    | 10 ++++--
+ src/launch-win.js                   | 26 ++++++++------
+ src/sidecar.js                      | 53 +++++++++++++++++++++++++----
+ test/launch-win-run.test.js         |  2 +-
+ test/launch-win.test.js             | 37 +++++++++++---------
+ test/sidecar.test.js                | 46 ++++++++++++++++++++++++-
+ test/steps/_win-helpers.js          |  8 +++--
+ test/steps/wt-args-builder.steps.js | 16 ++++++---
+ 9 files changed, 161 insertions(+), 47 deletions(-)
+
+diff --git a/bin/ccr.js b/bin/ccr.js
+index 325ece8..82dc00f 100755
+--- a/bin/ccr.js
++++ b/bin/ccr.js
+@@ -59,6 +59,7 @@ function main(argv) {
+         json: { type: 'boolean' },
+         'state-dir': { type: 'string' },
+         hint: { type: 'boolean' },
++        'exit-on-end': { type: 'boolean' },
+         mary: { type: 'boolean' },
+       },
+     });
+@@ -80,7 +81,7 @@ function main(argv) {
+     case 'economy': return cmdEconomy(!!values.json);
+     case 'resume': return cmdResume(positionals[1]);
+     case 'statusline': return cmdStatusline();
+-    case 'sidecar': return cmdSidecar(values['state-dir'], !!values.hint);
++    case 'sidecar': return cmdSidecar(values['state-dir'], !!values.hint, !!values['exit-on-end']);
+     case 'doctor': return require('../src/doctor').run();
+     case 'launch': return cmdLaunch(positionals[1]);
+     default: return cmdLaunch(cmd);               // anything else → treat as a CCS profile
+@@ -163,14 +164,17 @@ function cmdResume(arg) {
+  * `--state-dir <dir>` targets a specific session (used by the VS Code split-pane
+  * one-liner, which is shell-agnostic). `--hint` reprints the VS Code split
+  * instructions + re-copies the one-liner instead of running the panel.
++ * `--exit-on-end` closes the panel shortly after the session ends (the Windows
++ * Terminal launcher passes it so its `cmd /c` pane sweeps closed like tmux).
+  * @param {string | undefined} stateDir
+  * @param {boolean} [showHint]
++ * @param {boolean} [exitOnEnd]
+  * @returns {number | undefined}
+  */
+-function cmdSidecar(stateDir, showHint) {
++function cmdSidecar(stateDir, showHint, exitOnEnd) {
+   if (stateDir) process.env.CCR_STATE_DIR = stateDir;
+   if (showHint) return require('../src/launch-vscode').hint(process.env.CCR_STATE_DIR || STATE_DIR);
+-  require('../src/sidecar').run();
++  require('../src/sidecar').run({ exitOnEnd: !!exitOnEnd });
+   return undefined;
+ }
+ 
+diff --git a/features/wt-args-builder.feature b/features/wt-args-builder.feature
+index 74d4b54..5021de7 100644
+--- a/features/wt-args-builder.feature
++++ b/features/wt-args-builder.feature
+@@ -25,11 +25,17 @@ Feature: Windows Terminal argv construction
+     And the second pane command sets CCR_STATE_DIR then runs node with ccrJs and "sidecar"
+ 
+   @AC9
+-  Scenario: Per-pane environment is injected via cmd /k, not wt global env
++  Scenario: Per-pane environment is injected via cmd /c, not wt global env
+     When I build the wt.exe args
+-    Then each pane command is wrapped in `cmd /k set CCR_STATE_DIR=...&& ...`
++    Then each pane command is wrapped in `cmd /c set CCR_STATE_DIR=...&& ...`
+     And CCR_STATE_DIR is present in both panes' commands
+ 
++  @AC9
++  Scenario: The launch reuses the current window and sweeps closed on exit
++    When I build the wt.exe args
++    Then the args target the current window with "-w 0"
++    And the sidecar pane carries "--exit-on-end" so it sweeps closed on session end
++
+   @AC9
+   Scenario: Pane 0 appends the exit sentinel after Claude exits
+     When I build the wt.exe args
+diff --git a/src/launch-win.js b/src/launch-win.js
+index fd1248b..5fff709 100644
+--- a/src/launch-win.js
++++ b/src/launch-win.js
+@@ -131,16 +131,22 @@ function paneCommand(stateDir, body) {
+ 
+ /**
+  * Build the argv passed to wt.exe (excluding the wt.exe path itself):
+- *   new-tab --title Claude cmd /k "<pane0>" ; split-pane -H -s <frac> cmd /k "<pane1>"
++ *   -w 0 new-tab --title Claude cmd /c "<pane0>" ; split-pane -H -s <frac> cmd /c "<pane1>"
+  *
+- * The ";" pane separator is its own argv token (wt re-parses it). Per-pane env
+- * is injected via `cmd /k set ...` rather than wt global env. After Claude
+- * exits, pane 0 (unconditional `&`) drops the `exited` sentinel (so the sidecar
+- * can show a clean "session ended" state) and deletes the temp settings file
+- * (cleanup-after-window-closes; the file was only needed at Claude startup).
++ * `-w 0` targets the CURRENT Windows Terminal window (open a tab in the window
++ * you ran `ccr` from) instead of spawning a separate window. The ";" pane
++ * separator is its own argv token (wt re-parses it); per-pane env is injected via
++ * `cmd /c set ...` rather than wt global env.
++ *
++ * Teardown mirrors the tmux launcher's sweep (launch.sh: `… ; touch exited; …;
++ * kill-session`): both panes run under `cmd /c`, so each closes when its command
++ * ends. On Claude exit pane 0 drops the `exited` sentinel and deletes the temp
++ * settings file, then closes; the sidecar runs with `--exit-on-end` so it shows
++ * "session ended" briefly then exits, closing pane 1 — the whole tab folds back
++ * to where you started, instead of the sidecar lingering on "session ended".
+  *
+  * Throws if any interpolated value contains a character that would break (or, in
+- * the case of %, hijack) the cmd /k payload — see isWtArgSafe. run() catches
++ * the case of %, hijack) the cmd /c payload — see isWtArgSafe. run() catches
+  * this and reports a clean error instead of spawning a broken command.
+  *
+  * @param {{ ccCmd: string, settingsFile: string, stateDir: string,
+@@ -171,12 +177,12 @@ function buildWtArgs(o) {
+     stateDir,
+     `${ccCmd} --settings "${settingsFile}" & type nul > "${exited}" & del /q "${settingsFile}"`,
+   );
+-  const pane1 = paneCommand(stateDir, `"${node}" "${ccrJs}" sidecar`);
++  const pane1 = paneCommand(stateDir, `"${node}" "${ccrJs}" sidecar --exit-on-end`);
+ 
+   return [
+-    'new-tab', '--title', 'Claude', 'cmd', '/k', pane0,
++    '-w', '0', 'new-tab', '--title', 'Claude', 'cmd', '/c', pane0,
+     ';',
+-    'split-pane', splitFlag, '-s', frac, 'cmd', '/k', pane1,
++    'split-pane', splitFlag, '-s', frac, 'cmd', '/c', pane1,
+   ];
+ }
+ 
+diff --git a/src/sidecar.js b/src/sidecar.js
+index a6d0267..e633431 100644
+--- a/src/sidecar.js
++++ b/src/sidecar.js
+@@ -110,12 +110,53 @@ function frame() {
+   draw(composeFrame(STATE_DIR, { now: Date.now(), cols: process.stdout.columns }));
+ }
+ 
+-function run() {
+-  frame();
+-  const id = setInterval(frame, 1000);
+-  const stop = () => { clearInterval(id); process.exit(0); };
+-  process.on('SIGINT', stop);
+-  process.on('SIGTERM', stop);
++/**
++ * The live loop. With `exitOnEnd` (the Windows launcher passes `--exit-on-end`),
++ * the sidecar shows "session ended" for a beat then closes its own pane once the
++ * `exited` sentinel appears — so a `cmd /c` pane folds away on session end rather
++ * than lingering, matching the tmux launcher's kill-session sweep. Without it
++ * (Linux/tmux, standalone `ccr sidecar`) the loop runs until signalled, exactly
++ * as before. Side effects are injectable so the end-sweep is unit-testable.
++ *
++ * @param {{ exitOnEnd?: boolean, stateDir?: string, graceMs?: number,
++ *   tick?: () => void, sentinelExists?: () => boolean,
++ *   setIntervalFn?: Function, setTimeoutFn?: Function,
++ *   clearIntervalFn?: Function, clearTimeoutFn?: Function,
++ *   exit?: () => void, onSignal?: (sig: string, handler: () => void) => void }} [opts]
++ * @returns {() => void} the stop handler (exposed for tests)
++ */
++function run(opts = {}) {
++  const stateDir = opts.stateDir || STATE_DIR;
++  const exitOnEnd = opts.exitOnEnd != null ? opts.exitOnEnd : (process.env.CCR_SIDECAR_EXIT_ON_END === '1');
++  const graceMs = opts.graceMs != null ? opts.graceMs : 1500;
++  const tick = opts.tick || frame;
++  const sentinelExists = opts.sentinelExists || (() => fs.existsSync(path.join(stateDir, 'exited')));
++  const setIntervalFn = opts.setIntervalFn || setInterval;
++  const setTimeoutFn = opts.setTimeoutFn || setTimeout;
++  const clearIntervalFn = opts.clearIntervalFn || clearInterval;
++  const clearTimeoutFn = opts.clearTimeoutFn || clearTimeout;
++  const exit = opts.exit || (() => process.exit(0));
++  const onSignal = opts.onSignal || ((sig, handler) => process.on(sig, handler));
++
++  let id = null;
++  let endTimer = null;
++  const stop = () => {
++    if (id != null) clearIntervalFn(id);
++    if (endTimer != null) clearTimeoutFn(endTimer);
++    exit();
++  };
++  const loop = () => {
++    tick();
++    // Once the session has ended, show it for a beat then sweep this pane closed.
++    if (exitOnEnd && endTimer == null && sentinelExists()) {
++      endTimer = setTimeoutFn(stop, graceMs);
++    }
++  };
++  loop();
++  id = setIntervalFn(loop, 1000);
++  onSignal('SIGINT', stop);
++  onSignal('SIGTERM', stop);
++  return stop;
+ }
+ 
+ // `updateFeed` + `composeFrame` are exported for tests (the incremental tail +
+diff --git a/test/launch-win-run.test.js b/test/launch-win-run.test.js
+index 4386e83..4b67c5e 100644
+--- a/test/launch-win-run.test.js
++++ b/test/launch-win-run.test.js
+@@ -69,7 +69,7 @@ test('run: ccr <profile> targets the CCS state dir (@AC6)', () => {
+   assert.strictEqual(code, 0);
+ 
+   const { args } = calls.spawnWt[0];
+-  assert.match(args[5], /ccs c1 --settings/);
++  assert.match(args[7], /ccs c1 --settings/);
+   const stateDir = path.join('/home/me', '.ccr', 'c1');
+   assert.ok(args.filter((a) => a.startsWith('set "CCR_STATE_DIR=')).every((p) => p.includes(stateDir)));
+ });
+diff --git a/test/launch-win.test.js b/test/launch-win.test.js
+index a6ca145..5998e8c 100644
+--- a/test/launch-win.test.js
++++ b/test/launch-win.test.js
+@@ -81,19 +81,23 @@ const baseArgsInput = {
+ test('buildWtArgs: canonical two-pane argv (@AC9 @AC2)', () => {
+   const a = buildWtArgs(baseArgsInput);
+ 
+-  // Pane 0 = new-tab titled "Claude".
+-  assert.strictEqual(a[0], 'new-tab');
+-  assert.strictEqual(a[1], '--title');
+-  assert.strictEqual(a[2], 'Claude');
+-  assert.strictEqual(a[3], 'cmd');
+-  assert.strictEqual(a[4], '/k');
+-  const pane0 = a[5];
++  // `-w 0` targets the CURRENT Windows Terminal window (no separate window).
++  assert.strictEqual(a[0], '-w');
++  assert.strictEqual(a[1], '0');
++
++  // Pane 0 = new-tab titled "Claude", under cmd /c so the pane closes on exit.
++  assert.strictEqual(a[2], 'new-tab');
++  assert.strictEqual(a[3], '--title');
++  assert.strictEqual(a[4], 'Claude');
++  assert.strictEqual(a[5], 'cmd');
++  assert.strictEqual(a[6], '/c');
++  const pane0 = a[7];
+   assert.match(pane0, /set "CCR_STATE_DIR=C:\\Users\\me\\.ccr"/);
+   assert.match(pane0, /claude --settings "C:\\Temp\\ccr-settings-ab12\.json"/);
+ 
+   // ";" is a standalone separator token.
+   const sep = a.indexOf(';');
+-  assert.strictEqual(a[6], ';');
++  assert.strictEqual(a[8], ';');
+   assert.ok(sep > 0);
+ 
+   // Split + size. Default side is 'right' → a vertical split (-V).
+@@ -102,10 +106,11 @@ test('buildWtArgs: canonical two-pane argv (@AC9 @AC2)', () => {
+   assert.strictEqual(a[sep + 3], '-s');
+   assert.strictEqual(a[sep + 4], '0.34');
+   assert.strictEqual(a[sep + 5], 'cmd');
+-  assert.strictEqual(a[sep + 6], '/k');
++  assert.strictEqual(a[sep + 6], '/c');
+   const pane1 = a[sep + 7];
+   assert.match(pane1, /set "CCR_STATE_DIR=C:\\Users\\me\\.ccr"/);
+-  assert.match(pane1, /"C:\\Program Files\\nodejs\\node\.exe" "C:\\repo\\bin\\ccr\.js" sidecar/);
++  // Sidecar carries --exit-on-end so its cmd /c pane sweeps closed on session end.
++  assert.match(pane1, /"C:\\Program Files\\nodejs\\node\.exe" "C:\\repo\\bin\\ccr\.js" sidecar --exit-on-end/);
+ });
+ 
+ test('sidebarSplitFlag: side → wt split flag, defaulting to right (-V)', () => {
+@@ -125,23 +130,23 @@ test('buildWtArgs: sidebarSide bottom uses a horizontal split (-H)', () => {
+   assert.strictEqual(a[sep + 2], '-H');
+ });
+ 
+-test('buildWtArgs: per-pane env via cmd /k, present in both panes (@AC9)', () => {
++test('buildWtArgs: per-pane env via cmd /c, present in both panes (@AC9)', () => {
+   const a = buildWtArgs(baseArgsInput);
+-  const cmdK = a.filter((t, i) => t === 'cmd' && a[i + 1] === '/k');
+-  assert.strictEqual(cmdK.length, 2);
++  const cmdC = a.filter((t, i) => t === 'cmd' && a[i + 1] === '/c');
++  assert.strictEqual(cmdC.length, 2);
+   const panes = a.filter((t) => t.startsWith('set "CCR_STATE_DIR='));
+   assert.strictEqual(panes.length, 2);
+ });
+ 
+ test('buildWtArgs: pane 0 appends the exited sentinel (@AC9 @AC5)', () => {
+   const a = buildWtArgs(baseArgsInput);
+-  const pane0 = a[5];
++  const pane0 = a[7];
+   assert.match(pane0, /& type nul > "C:\\Users\\me\\.ccr\\exited"/);
+ });
+ 
+ test('buildWtArgs: pane 0 deletes the temp settings file on exit (@AC8)', () => {
+   const a = buildWtArgs(baseArgsInput);
+-  const pane0 = a[5];
++  const pane0 = a[7];
+   assert.match(pane0, /& del \/q "C:\\Temp\\ccr-settings-ab12\.json"/);
+ });
+ 
+@@ -155,7 +160,7 @@ test('buildWtArgs: settings passed by path, never inline JSON (@AC9 @AC8)', () =
+ 
+ test('buildWtArgs: ccs profile command flows through pane 0 (@AC6)', () => {
+   const a = buildWtArgs({ ...baseArgsInput, ccCmd: 'ccs c1' });
+-  assert.match(a[5], /ccs c1 --settings /);
++  assert.match(a[7], /ccs c1 --settings /);
+ });
+ 
+ test('findWindowsTerminal: returns null when wt is absent (@AC7)', () => {
+diff --git a/test/sidecar.test.js b/test/sidecar.test.js
+index 582d09d..0309b56 100644
+--- a/test/sidecar.test.js
++++ b/test/sidecar.test.js
+@@ -11,7 +11,51 @@ const fs = require('node:fs');
+ const os = require('node:os');
+ const path = require('node:path');
+ 
+-const { composeFrame, updateFeed } = require('../src/sidecar.js');
++const { composeFrame, updateFeed, run } = require('../src/sidecar.js');
++
++// A fully-injected harness for run() so the end-of-session sweep is testable
++// without real timers, process.exit, or stdout writes.
++function runHarness(over = {}) {
++  const w = { ticks: 0, scheduled: [], cleared: { interval: 0, timeout: 0 }, exited: 0, signals: [] };
++  const deps = {
++    graceMs: 1500,
++    tick: () => { w.ticks++; },
++    sentinelExists: () => !!over.sentinel,
++    setIntervalFn: () => 'INTERVAL_ID',
++    setTimeoutFn: (cb, ms) => { w.scheduled.push({ cb, ms }); return 'TIMEOUT_ID'; },
++    clearIntervalFn: () => { w.cleared.interval++; },
++    clearTimeoutFn: () => { w.cleared.timeout++; },
++    exit: () => { w.exited++; },
++    onSignal: (sig) => { w.signals.push(sig); },
++    ...over.deps,
++    exitOnEnd: over.exitOnEnd,
++  };
++  const stop = run(deps);
++  return { w, stop };
++}
++
++test('run: --exit-on-end schedules a sweep-close once the session has ended', () => {
++  const { w } = runHarness({ exitOnEnd: true, sentinel: true });
++  assert.strictEqual(w.ticks >= 1, true, 'rendered at least once');
++  assert.strictEqual(w.scheduled.length, 1, 'one end-sweep scheduled');
++  assert.strictEqual(w.scheduled[0].ms, 1500, 'after the grace window');
++  // Firing the scheduled sweep closes the pane: clears the loop and exits.
++  w.scheduled[0].cb();
++  assert.strictEqual(w.exited, 1);
++  assert.strictEqual(w.cleared.interval, 1);
++});
++
++test('run: without --exit-on-end a session end never self-closes (tmux/standalone)', () => {
++  const { w } = runHarness({ exitOnEnd: false, sentinel: true });
++  assert.strictEqual(w.scheduled.length, 0, 'no self-close scheduled');
++  assert.strictEqual(w.exited, 0);
++  assert.deepStrictEqual(w.signals, ['SIGINT', 'SIGTERM'], 'still wired to signals');
++});
++
++test('run: --exit-on-end does NOT close while the session is still live', () => {
++  const { w } = runHarness({ exitOnEnd: true, sentinel: false });
++  assert.strictEqual(w.scheduled.length, 0, 'no sweep until the exited sentinel appears');
++});
+ 
+ function freshStateDir() {
+   return fs.mkdtempSync(path.join(os.tmpdir(), 'ccr-sidecar-'));
+diff --git a/test/steps/_win-helpers.js b/test/steps/_win-helpers.js
+index aff578f..0a9c6fd 100644
+--- a/test/steps/_win-helpers.js
++++ b/test/steps/_win-helpers.js
+@@ -39,18 +39,20 @@ const append = (f, lines) => fs.appendFileSync(f, lines.map((l) => l + '\n').joi
+ 
+ /**
+  * Split the wt.exe argv into its meaningful pieces. Shape (see buildWtArgs):
+- *   new-tab --title Claude cmd /k <pane0> ; split-pane <flag> -s <frac> cmd /k <pane1>
++ *   -w 0 new-tab --title Claude cmd /c <pane0> ; split-pane <flag> -s <frac> cmd /c <pane1>
+  * @param {string[]} args
+  */
+ function panes(args) {
+   const sep = args.indexOf(';');
++  const firstCmd = args.indexOf('cmd'); // pane 0's payload follows the first `cmd /c`
+   return {
+-    pane0: args[5],
++    pane0: args[firstCmd + 2],
+     pane1: args[args.length - 1],
+     splitFlag: args[sep + 2],
+     frac: args[sep + 4],
+-    hasNewTab: args[0] === 'new-tab',
++    hasNewTab: args.includes('new-tab'),
+     hasSplit: args[sep + 1] === 'split-pane',
++    targetsCurrentWindow: args[0] === '-w' && args[1] === '0',
+   };
+ }
+ 
+diff --git a/test/steps/wt-args-builder.steps.js b/test/steps/wt-args-builder.steps.js
+index 24e04f5..eda7dfa 100644
+--- a/test/steps/wt-args-builder.steps.js
++++ b/test/steps/wt-args-builder.steps.js
+@@ -44,7 +44,7 @@ module.exports = function defineWtArgsBuilderSteps(reg) {
+ 
+   // Then
+   reg.define(/^the first pane is a "new-tab" titled "Claude"$/, (w) => {
+-    assert.strictEqual(w.args[0], 'new-tab');
++    assert.ok(w.args.includes('new-tab'));
+     assert.ok(w.args.includes('Claude'));
+   });
+   reg.define(/^the first pane command sets CCR_STATE_DIR then runs `claude --settings` with the settings file$/, (w) => {
+@@ -64,13 +64,19 @@ module.exports = function defineWtArgsBuilderSteps(reg) {
+   reg.define(/^the second pane command sets CCR_STATE_DIR then runs node with ccrJs and "sidecar"$/, (w) => {
+     const { pane1 } = panes(w.args);
+     assert.match(pane1, /^set "CCR_STATE_DIR=/);
+-    assert.match(pane1, /sidecar$/);
++    assert.match(pane1, /sidecar --exit-on-end$/);
+   });
+-  reg.define(/^each pane command is wrapped in `cmd \/k set CCR_STATE_DIR=\.\.\.&& \.\.\.`$/, (w) => {
+-    const idxs = w.args.map((/** @type {string} */ t, /** @type {number} */ i) => (t === 'cmd' && w.args[i + 1] === '/k' ? i + 2 : -1)).filter((/** @type {number} */ i) => i >= 0);
+-    assert.strictEqual(idxs.length, 2, 'two cmd /k panes');
++  reg.define(/^each pane command is wrapped in `cmd \/c set CCR_STATE_DIR=\.\.\.&& \.\.\.`$/, (w) => {
++    const idxs = w.args.map((/** @type {string} */ t, /** @type {number} */ i) => (t === 'cmd' && w.args[i + 1] === '/c' ? i + 2 : -1)).filter((/** @type {number} */ i) => i >= 0);
++    assert.strictEqual(idxs.length, 2, 'two cmd /c panes');
+     for (const i of idxs) assert.match(w.args[i], /^set "CCR_STATE_DIR=.*"&& /);
+   });
++  reg.define(/^the args target the current window with "-w 0"$/, (w) => {
++    assert.ok(panes(w.args).targetsCurrentWindow, 'expected leading -w 0');
++  });
++  reg.define(/^the sidecar pane carries "--exit-on-end" so it sweeps closed on session end$/, (w) => {
++    assert.match(panes(w.args).pane1, /sidecar --exit-on-end$/);
++  });
+   reg.define(/^CCR_STATE_DIR is present in both panes' commands$/, (w) => {
+     const p = panes(w.args);
+     assert.ok(p.pane0.includes('CCR_STATE_DIR=') && p.pane1.includes('CCR_STATE_DIR='));
+-- 
+2.54.0
+
