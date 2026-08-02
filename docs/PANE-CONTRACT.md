@@ -199,6 +199,9 @@ displays, come from user-authored configuration only.**
   files are rejected), and must NOT live under any configured blob's
   directory or inside a repository working tree — a repo-local prompt file
   would let anyone who can merge a PR type into the agent session.
+  (Ruled 2026-08-01: user-config-dir-only is the default and the contract;
+  a per-path repo-local opt-in is DEFERRED until someone actually wants a
+  non-default prompt badly enough to ask.)
 - Injection semantics are pinned: the text is typed **literally** (never
   interpreted as key names), newlines flattened to spaces, exactly one
   submit keypress at the end — the `inject-orient.sh` discipline, now
