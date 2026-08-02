@@ -87,7 +87,11 @@ function parseEvents(input) {
   const meta = { sessionId: /** @type {string|null} */(null), cwd: /** @type {string|null} */(null), gitBranch: /** @type {string|null} */(null), version: /** @type {string|null} */(null), startTs: /** @type {number|null} */(null), lastTs: /** @type {number|null} */(null) };
   /** @type {{ ts: number|null, kind: 'tool'|'cmd', tool: string, arg: string }[]} */
   const events = [];
-  const tools = /** @type {Record<string, number>} */ ({});
+  // Null-prototype: keys are tool NAMES straight out of the transcript. On a
+  // plain object, `tools['constructor'] || 0` reads the inherited Object
+  // constructor (which then rendered as its native source in the feed header),
+  // and `tools['__proto__'] = n` performs a prototype write instead of counting.
+  const tools = /** @type {Record<string, number>} */ (Object.create(null));
   const tokens = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 };
   const files = new Set();
   const models = new Set();
@@ -111,7 +115,7 @@ function parseEvents(input) {
     if (meta.sessionId == null && o.sessionId) meta.sessionId = stripControl(String(o.sessionId));
     if (meta.cwd == null && o.cwd) meta.cwd = stripControl(String(o.cwd));
     if (meta.gitBranch == null && o.gitBranch) meta.gitBranch = stripControl(String(o.gitBranch));
-    if (meta.version == null && o.version) meta.version = o.version;
+    if (meta.version == null && o.version) meta.version = stripControl(o.version);
     const ts = o.timestamp ? Date.parse(o.timestamp) : NaN;
     const tsOk = Number.isFinite(ts) ? ts : null;
     if (tsOk != null) {
@@ -137,7 +141,10 @@ function parseEvents(input) {
     if (o.type === 'assistant') {
       assistantTurns++;
       const msg = o.message || {};
-      if (msg.model) { models.add(msg.model); lastModel = msg.model; }
+      // Sanitize here, not at the renderer: parseEvents is the documented choke
+      // point "so every renderer is covered", and lastModel/models are consumed
+      // by src/render/resume.js outside the sidecar's graph.
+      if (msg.model) { const m = stripControl(msg.model); models.add(m); lastModel = m; }
       const u = msg.usage;
       if (u) {
         const turn = { input: u.input_tokens || 0, output: u.output_tokens || 0, cacheRead: u.cache_read_input_tokens || 0, cacheCreate: u.cache_creation_input_tokens || 0 };
@@ -223,36 +230,45 @@ const MAX_READ = 4 * 1024 * 1024; // bound one tick's allocation; large backlogs
  * transcript is append-only; if it shrank (rotation/truncation) we restart at 0.
  * Reads at most `maxRead` bytes per call (bounded allocation), so a very large
  * transcript is consumed over several ticks rather than in one giant buffer.
- * Returns the new byte offset (advanced only past whole lines).
+ * Returns the new byte offset (advanced only past whole lines), and `restarted`
+ * — true when the file had shrunk and the tail went back to 0. Callers that
+ * ACCUMULATE across calls must reset their totals when they see it, or they
+ * re-add everything the restart is about to replay.
  * @param {string} file
  * @param {number} [fromOffset]
  * @param {number} [maxRead]
- * @returns {{ offset: number, lines: string[] }}
+ * @returns {{ offset: number, lines: string[], restarted: boolean }}
  */
 function readNewLines(file, fromOffset = 0, maxRead = MAX_READ) {
-  let st; try { st = fs.statSync(file); } catch { return { offset: fromOffset, lines: [] }; }
+  let st; try { st = fs.statSync(file); } catch { return { offset: fromOffset, lines: [], restarted: false }; }
   let start = fromOffset;
-  if (st.size < start) start = 0;               // truncated/rotated → restart
+  const restarted = st.size < start;            // truncated/rotated → restart
+  if (restarted) start = 0;
   let len = st.size - start;
-  if (len <= 0) return { offset: st.size, lines: [] };
+  if (len <= 0) return { offset: st.size, lines: [], restarted };
   const capped = len > maxRead;                 // more data than one window holds
   if (capped) len = maxRead;
   const fd = fs.openSync(file, 'r');
   try {
     const buf = Buffer.alloc(len);
-    fs.readSync(fd, buf, 0, len, start);
-    const text = buf.toString('utf8');
-    const lastNl = text.lastIndexOf('\n');
+    const read = fs.readSync(fd, buf, 0, len, start);
+    // Find the line break in the BYTES, and advance by bytes. Decoding first and
+    // re-encoding the kept prefix (what this used to do) is not a round trip:
+    // every invalid UTF-8 byte decodes to U+FFFD and re-encodes to THREE bytes,
+    // so the offset overshot the file — after which `st.size < start` reads as a
+    // truncation, the tail restarts at 0, and the whole transcript is re-ingested
+    // every tick, forever, with the stats inflating each time. One stray binary
+    // byte in a tool result was enough. Byte arithmetic has no such failure.
+    const lastNl = buf.lastIndexOf(0x0a, read - 1);
     if (lastNl < 0) {
       // No complete line in this window. If capped, the current line is longer
       // than the cap — skip past the window to guarantee forward progress (the
       // resulting partial line fails JSON.parse and is tolerated). Otherwise the
       // last line just isn't finished yet; wait for more.
-      return capped ? { offset: start + len, lines: [] } : { offset: start, lines: [] };
+      return capped ? { offset: start + len, lines: [], restarted } : { offset: start, lines: [], restarted };
     }
-    const whole = text.slice(0, lastNl);
-    const consumed = start + Buffer.byteLength(whole, 'utf8') + 1; // +1 for the newline
-    return { offset: consumed, lines: whole.split('\n').filter(Boolean) };
+    const text = buf.subarray(0, lastNl).toString('utf8');
+    return { offset: start + lastNl + 1, lines: text.split('\n').filter(Boolean), restarted };
   } finally {
     fs.closeSync(fd);
   }

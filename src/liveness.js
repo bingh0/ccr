@@ -21,6 +21,23 @@ function envStaleMs() {
 }
 
 /**
+ * Snapshot age for the freshness note. Minutes roll into hours and hours into
+ * days: an overnight-idle pane used to read "updated 1500m ago", which is
+ * accurate and unreadable.
+ * @param {number} ageMs
+ * @returns {string}
+ */
+function fmtAge(ageMs) {
+  const m = Math.floor(ageMs / 60000);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) { const r = m % 60; return r ? `${h}h${String(r).padStart(2, '0')}m` : `${h}h`; }
+  const d = Math.floor(h / 24);
+  const rh = h % 24;
+  return rh ? `${d}d${rh}h` : `${d}d`;
+}
+
+/**
  * @param {{ exited?: boolean, ageMs?: number, staleMs?: number }} input
  * @returns {{ mode: 'ended' | 'live', marker: string | null }}
  *   mode 'live'  → render the dashboard (optionally with a freshness marker)
@@ -32,7 +49,7 @@ function liveness(input) {
 
   const ageMs = input.ageMs ?? 0;
   const staleMs = input.staleMs ?? envStaleMs() ?? DEFAULT_STALE_MS;
-  const marker = ageMs >= staleMs ? `updated ${Math.floor(ageMs / 60000)}m ago` : null;
+  const marker = ageMs >= staleMs ? `updated ${fmtAge(ageMs)} ago` : null;
   return { mode: 'live', marker };
 }
 

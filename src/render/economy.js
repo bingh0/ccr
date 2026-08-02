@@ -28,7 +28,9 @@ function wallRow(/** @type {any} */ row, /** @type {any} */ L, /** @type {boolea
   const dotColor = row.resetsFirst ? green : bandColor[b];
   const dot = (row.binding && b === 'imminent') ? flash(tick, '●') : dotColor('●');
 
-  const labelTxt = row.label.padEnd(labelW);
+  // Truncate as well as pad: labelW is capped, so a longer label must be cut to
+  // the column rather than pushing every sibling row out of alignment.
+  const labelTxt = (row.label.length > labelW ? row.label.slice(0, labelW - 1) + '…' : row.label).padEnd(labelW);
   const label = row.binding ? bold(bandColor[b](labelTxt)) : dim(labelTxt);
   // Time-to-exhaust carries no word: the sibling "resets …" is self-labelling,
   // so a bare "~8h43m" reads unambiguously as remaining budget.
@@ -59,7 +61,13 @@ function renderEconomy(view, opts = {}) {
   const out = [bold('economy') + dim('   ' + (view.model || '')), ''];
 
   const { rows, next } = classifyWindows(view);
-  const labelW = Math.max(8, ...rows.map((/** @type {any} */ r) => r.label.length));
+  // Cap the label column. `labelW` multiplies: every row pads to it, so cost is
+  // rows × longest-label, and BOTH come from the snapshot's rate_limits keys. A
+  // planted file with many buckets and one very long key built a string large
+  // enough to throw RangeError and blank the panel — an amplifier, not a leak,
+  // but it costs the whole display. 18 columns fits every real bucket name.
+  const LABEL_MAX = 18;
+  const labelW = Math.min(LABEL_MAX, Math.max(8, ...rows.map((/** @type {any} */ r) => r.label.length)));
 
   // HERO
   if (!rows.length) {

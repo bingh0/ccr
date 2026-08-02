@@ -15,6 +15,8 @@ const { renderFeed } = require('./render/feed');
 const { clampVisible } = require('./render/shared');
 const { liveness } = require('./liveness');
 const { currentTranscriptPath, readNewLines, parseEvents } = require('./transcripts');
+const { readTextCapped } = require('./safe-read');
+const { stripControl } = require('./sanitize');
 
 const STATE_DIR = process.env.CCR_STATE_DIR || path.join(os.homedir(), '.ccr');
 
@@ -45,18 +47,34 @@ function parseNonce(s) {
  * claimed over (a garbage file must not wedge the panel), and any fs error
  * claims rather than kills the loop — the heartbeat is strictly best-effort.
  * @param {string} stateDir @param {string} nonce
+ * @param {{ now?: number, freshMs?: number }} [opts] injectable clock, for tests
  * @returns {'claimed' | 'yielded'}
  */
-function heartbeatTick(stateDir, nonce) {
+function heartbeatTick(stateDir, nonce, opts = {}) {
   const file = path.join(stateDir, HEARTBEAT_FILE);
   const mine = parseNonce(nonce);
+  const now = opts.now != null ? opts.now : Date.now();
+  const freshMs = opts.freshMs != null ? opts.freshMs : HEARTBEAT_FRESH_MS;
   try {
-    let cur = '';
-    try { cur = fs.readFileSync(file, 'utf8'); } catch { /* no heartbeat yet */ }
-    const other = cur && cur.trim() !== nonce ? parseNonce(cur) : null;
+    const cur = readTextCapped(file, 256) || '';
+    // Yield only to a nonce that is BOTH newer and still being beaten. Nonce
+    // order alone is a wall-clock comparison against a file that outlives its
+    // writer: a hard-killed sidecar leaves its nonce behind, and after any
+    // backwards clock step (NTP correction, VM restore) every sidecar launched
+    // since reads that dead nonce as "newer" and stands down — so the pane ends
+    // up with no live sidecar at all, repeatably, until the clock catches up.
+    // Mtime is what distinguishes a live rival from a corpse; sidecarAlive()
+    // has always used it, and the takeover decision needs it just as much.
+    const fresh = (() => {
+      try { return now - fs.lstatSync(file).mtimeMs <= freshMs; } catch { return false; }
+    })();
+    const other = fresh && cur && cur.trim() !== nonce ? parseNonce(cur) : null;
     if (other && mine && (other.start > mine.start || (other.start === mine.start && other.pid > mine.pid))) {
       return 'yielded';
     }
+    // Never write THROUGH a symlink planted at this path — that turns a
+    // heartbeat into an arbitrary-file write of "<pid>:<ms>".
+    try { if (fs.lstatSync(file).isSymbolicLink()) fs.rmSync(file, { force: true }); } catch { /* absent */ }
     fs.writeFileSync(file, nonce);
   } catch { /* best-effort */ }
   return 'claimed';
@@ -70,7 +88,7 @@ function heartbeatTick(stateDir, nonce) {
 function clearHeartbeat(stateDir, nonce) {
   const file = path.join(stateDir, HEARTBEAT_FILE);
   try {
-    if (fs.readFileSync(file, 'utf8').trim() === nonce) fs.rmSync(file, { force: true });
+    if ((readTextCapped(file, 256) || '').trim() === nonce) fs.rmSync(file, { force: true });
   } catch { /* already gone / unreadable — nothing to clear */ }
 }
 
@@ -95,15 +113,30 @@ function sidecarAlive(stateDir, opts = {}) {
 // offset) and roll up tool/skill events + per-session stats. Reset on session
 // switch. Best-effort — must never break the economy panel.
 const FEED_CAP = 200;
-const feedState = { path: /** @type {string|null} */ (null), offset: 0, events: /** @type {any[]} */ ([]), tools: /** @type {Record<string,number>} */ ({}), commands: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 }, files: new Set() };
+const feedState = { path: /** @type {string|null} */ (null), offset: 0, events: /** @type {any[]} */ ([]), tools: /** @type {Record<string,number>} */ (Object.create(null)), commands: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 }, files: new Set() };
+
+/** Zero the rolling totals — on a session switch, and on a tail restart. */
+function resetFeedState(/** @type {string|null} */ tpath) {
+  feedState.path = tpath; feedState.offset = 0; feedState.events = [];
+  // Null-prototype: these keys are tool NAMES from the transcript, i.e. attacker
+  // -influenceable. On a plain object a tool called "constructor" reads back the
+  // inherited function (the feed header rendered its native source), and one
+  // called "__proto__" silently vanishes into a prototype write instead of
+  // counting. With no prototype there is nothing to inherit or to set.
+  feedState.tools = Object.create(null);
+  feedState.commands = 0;
+  feedState.tokens = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 };
+  feedState.files = new Set();
+}
 
 /** @param {string} tpath @returns {any} feed view for renderFeed */
 function updateFeed(tpath) {
-  if (feedState.path !== tpath) {           // new session → start clean
-    feedState.path = tpath; feedState.offset = 0; feedState.events = []; feedState.tools = {};
-    feedState.commands = 0; feedState.tokens = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 }; feedState.files = new Set();
-  }
-  const { offset, lines } = readNewLines(tpath, feedState.offset);
+  if (feedState.path !== tpath) resetFeedState(tpath);   // new session → start clean
+  const { offset, lines, restarted } = readNewLines(tpath, feedState.offset);
+  // The tail went back to 0 because the file shrank, so the lines below are ones
+  // we have already counted. Resetting the offset without resetting the totals
+  // double-counts every tool, file, and token for the rest of the session.
+  if (restarted) resetFeedState(tpath);
   feedState.offset = offset;
   if (lines.length) {
     const p = parseEvents(lines);
@@ -155,8 +188,9 @@ function composeFrame(stateDir, opts = {}) {
   const exited = path.join(stateDir, 'exited');
 
   if (fs.existsSync(exited)) return clamp(bold('ccr') + '  ' + dim('session ended') + '\n');
-  let raw = '';
-  try { raw = fs.readFileSync(snapshot, 'utf8'); } catch { /* none yet */ }
+  // Capped, regular-files-only read: a fifo here would block this synchronous
+  // loop forever and an unbounded file can blank the panel (see src/safe-read.js).
+  const raw = readTextCapped(snapshot) || '';
   if (!raw.trim()) return clamp(dim('ccr · waiting for the first status tick…') + '\n');
   let state;
   try { state = JSON.parse(raw); } catch { return clamp(dim('ccr · status unreadable') + '\n'); }
@@ -169,7 +203,11 @@ function composeFrame(stateDir, opts = {}) {
     const reconciled = { ...state, rate_limits: freshenAccountLimits(state.rate_limits, stateDir) };
     out = renderEconomy(normalizeStatus(reconciled), { tick: Math.floor(now / 1000) % 2 === 0 });
   } catch (e) {
-    out = dim('ccr render error: ' + (e && e instanceof Error ? e.message : String(e)));
+    // Sanitize and bound the message: it is the one error surface that prints
+    // text ccr did not author, and an exception string can quote the input that
+    // caused it. Everything else here is a named state naming a path only.
+    const msg = stripControl(e && e instanceof Error ? e.message : String(e)) || 'unknown';
+    out = dim('ccr render error: ' + msg.slice(0, 120));
   }
   // Live tool/skills feed below the panel — best-effort; never break the panel.
   // Its inner width tracks the pane so args truncate cleanly (the clamp below is

@@ -18,10 +18,32 @@ test('stripControl removes C0/C1 controls, DEL, ESC — keeps printable text', (
   assert.strictEqual(stripControl('plain 4.8'), 'plain 4.8'); // identity on clean input
 });
 
-test('stripControl passes non-strings through unchanged', () => {
+test('stripControl passes only null/undefined through — everything else is coerced and stripped', () => {
+  // Absent stays absent: callers use these as "no value" (`x || null`).
   assert.strictEqual(stripControl(null), null);
   assert.strictEqual(stripControl(undefined), undefined);
-  assert.strictEqual(stripControl(42), 42);
+  // Everything else becomes a sanitized STRING. This used to return non-strings
+  // unchanged, which was the bypass below: skipping the strip does not keep a
+  // value out of the terminal, because the renderers stringify it anyway.
+  assert.strictEqual(stripControl(42), '42');
+});
+
+test('stripControl closes the non-string bypass: an array smuggles no escapes', () => {
+  const payload = '\x1b]0;PWNED\x07\x1b]52;c;cHduZWQ=\x07\x1b[6n';
+  // An array of one string stringifies straight back to that string, so a JSON
+  // file can choose the type and defeat a typeof check. Both forms must strip.
+  assert.strictEqual(stripControl([payload]), stripControl(payload));
+  assert.ok(!CTRL.test(stripControl([payload])), 'escapes survived via an array');
+  assert.ok(!CTRL.test(stripControl({ toString: () => payload })), 'escapes survived via toString');
+});
+
+test('stripControl removes bidi overrides and zero-width characters', () => {
+  // Not C0/C1, but display control: they reorder or hide what the reader sees
+  // relative to the bytes present (CVE-2021-42574, applied to a status pane).
+  for (const evil of ['‮', '​', '⁦', ' ', '﻿']) {
+    const out = stripControl('safe' + evil + 'text');
+    assert.strictEqual(out, 'safetext', `${JSON.stringify(evil)} survived`);
+  }
 });
 
 test('normalizeStatus sanitizes the model display name', () => {

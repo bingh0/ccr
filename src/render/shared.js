@@ -21,12 +21,61 @@ function bar(/** @type {number} */ p, w = 10) {
   return '▓'.repeat(f) + '░'.repeat(w - f);
 }
 
+// Code-point ranges a terminal renders two columns wide (East Asian Wide and
+// Fullwidth, per UAX #11), condensed to the blocks that actually turn up in a
+// file path, a model name, or a tool argument: CJK, Hangul, Kana, fullwidth
+// forms, and the emoji planes. Not exhaustive — it does not need to be. Every
+// range here converts a "counted 1, occupies 2" error, which overflows the pane
+// and soft-wraps, into a correct count.
+const WIDE_RANGES = [
+  [0x1100, 0x115f],   // Hangul Jamo
+  [0x2e80, 0x303e],   // CJK radicals, Kangxi, CJK symbols/punctuation
+  [0x3041, 0x33ff],   // Kana, Bopomofo, Hangul Compat Jamo, CJK compat
+  [0x3400, 0x4dbf],   // CJK Ext A
+  [0x4e00, 0x9fff],   // CJK Unified
+  [0xa000, 0xa4cf],   // Yi
+  [0xac00, 0xd7a3],   // Hangul syllables
+  [0xf900, 0xfaff],   // CJK compat ideographs
+  [0xfe30, 0xfe6f],   // CJK compat forms, small form variants
+  [0xff00, 0xff60],   // Fullwidth forms
+  [0xffe0, 0xffe6],   // Fullwidth signs
+  [0x1f300, 0x1f64f], // Emoji: symbols/pictographs, emoticons
+  [0x1f900, 0x1f9ff], // Supplemental symbols/pictographs
+  [0x20000, 0x3fffd], // CJK Ext B+ (SIP)
+];
+
 /**
- * Clamp one line to `cols` visible columns: SGR escapes (`\x1b[…m`) pass through
- * with zero width, printable chars count as 1. Appends a reset if it had to cut,
- * so a severed colour run doesn't bleed into the cleared tail. Prevents the soft
- * wrap that corrupts the sidecar's cursor-home redraw in a narrow pane. A
+ * Terminal columns occupied by one code point: 2 for East Asian Wide/Fullwidth,
+ * 0 for combining marks (they stack onto the previous glyph), else 1.
+ * @param {number} cp
+ * @returns {0|1|2}
+ */
+function charWidth(cp) {
+  // Combining diacriticals, and the Hebrew/Arabic/Devanagari combining blocks
+  // most likely to appear in fetched text. Zero-width formatting characters are
+  // already gone by here (src/sanitize.js strips them at ingestion).
+  if ((cp >= 0x0300 && cp <= 0x036f) || (cp >= 0x0483 && cp <= 0x0489)
+    || (cp >= 0x0591 && cp <= 0x05bd) || (cp >= 0x0610 && cp <= 0x061a)
+    || (cp >= 0x064b && cp <= 0x065f) || (cp >= 0x0900 && cp <= 0x0903)
+    || (cp >= 0x1ab0 && cp <= 0x1aff) || (cp >= 0x20d0 && cp <= 0x20f0)
+    || (cp >= 0xfe00 && cp <= 0xfe0f)) return 0;   // incl. variation selectors
+  for (const [lo, hi] of WIDE_RANGES) if (cp >= lo && cp <= hi) return 2;
+  return 1;
+}
+
+/**
+ * Clamp one line to `cols` visible COLUMNS: SGR escapes (`\x1b[…m`) pass through
+ * with zero width; every other character counts for the columns a terminal will
+ * actually give it (see charWidth). Appends a reset if it had to cut, so a
+ * severed colour run doesn't bleed into the cleared tail. Prevents the soft wrap
+ * that corrupts the sidecar's cursor-home redraw in a narrow pane. A
  * non-positive `cols` (e.g. a non-TTY where columns is undefined) is a no-op.
+ *
+ * Iterates by CODE POINT, not by UTF-16 unit: the old per-unit walk counted a
+ * CJK glyph as one column (so 8 of them filled a 16-column pane and wrapped —
+ * the exact corruption this function exists to prevent) and could cut an astral
+ * character in half, emitting a lone surrogate.
+ *
  * @param {string} line
  * @param {number} [cols]
  * @returns {string}
@@ -41,17 +90,24 @@ function clampVisible(line, cols) {
     sgr.lastIndex = i;
     const m = sgr.exec(line);
     if (m) { out += m[0]; i = sgr.lastIndex; continue; }
-    if (width >= cols) return out + '\x1b[0m';
-    out += line[i];
-    width += 1;
-    i += 1;
+    const cp = /** @type {number} */ (line.codePointAt(i));
+    const ch = String.fromCodePoint(cp);
+    const w = charWidth(cp);
+    // Cut BEFORE a character that would not fit whole — a wide glyph straddling
+    // the last column is what wraps the line.
+    if (width + w > cols) return out + '\x1b[0m';
+    out += ch;
+    width += w;
+    i += ch.length;
   }
   return out;
 }
 
 function tok(/** @type {number|null} */ n) {
-  if (n == null) return '?';
-  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+  if (n == null || !Number.isFinite(n)) return '?';
+  // 999_500 rounds to 1000K, which is a unit the scale never uses — promote it
+  // to 1.0M rather than printing a fourth digit.
+  if (n >= 999500) return (n / 1e6).toFixed(1) + 'M';
   if (n >= 1e3) return Math.round(n / 1e3) + 'K';
   return String(Math.round(n));
 }

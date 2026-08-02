@@ -318,7 +318,37 @@ test('updateFeed restarts from 0 if the file shrank (rotation/truncation)', () =
   // Truncate to a single, different line — offset now exceeds file size.
   fs.writeFileSync(f, toolLine('Bash', { description: 'fresh' }) + '\n');
   const after = updateFeed(f);
-  assert.ok(after.tools.Bash >= 1, 'the post-truncation line is read after restart');
+  // EXACT counts, not `>= 1`: the loose assertion this replaces passed just as
+  // happily when the restart re-added everything it had already counted.
+  assert.strictEqual(after.tools.Bash, 1, 'the post-truncation line is read after restart');
+  assert.strictEqual(after.tools.Edit, undefined, 'pre-truncation counts do not survive the restart');
+  assert.strictEqual(after.events.length, 1, 'the buffer holds only what the file now contains');
+
+  fs.unlinkSync(f);
+});
+
+test('updateFeed does not double-count when the file shrinks but keeps old content', () => {
+  // The nastier shape of the same bug: the tail restarts at 0 and re-reads lines
+  // it already counted, so every total silently doubles for the rest of the
+  // session. Nothing here is "new" data — the truthful answer is what the file
+  // holds right now.
+  const f = tmpFile();
+  append(f, [toolLine('Edit', { file_path: 'a.js' }), toolLine('Edit', { file_path: 'b.js' }), toolLine('Edit', { file_path: 'c.js' })]);
+  assert.strictEqual(updateFeed(f).tools.Edit, 3);
+  fs.writeFileSync(f, toolLine('Edit', { file_path: 'a.js' }) + '\n' + toolLine('Edit', { file_path: 'b.js' }) + '\n');
+  const after = updateFeed(f);
+  assert.strictEqual(after.tools.Edit, 2, 'counts describe the current file, not file + replay');
+  assert.strictEqual(after.files.length, 2, 'the file set is rebuilt, not accumulated');
+
+  fs.unlinkSync(f);
+});
+
+test('a tool named "constructor" is counted, not inherited from Object.prototype', () => {
+  const f = tmpFile();
+  append(f, [toolLine('constructor', { file_path: 'x.js' })]);
+  const feed = updateFeed(f);
+  assert.strictEqual(feed.tools.constructor, 1, 'counted as a plain key');
+  assert.ok(!String(feed.tools.constructor).includes('native code'), 'never the inherited function');
 
   fs.unlinkSync(f);
 });
