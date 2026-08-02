@@ -17,7 +17,7 @@ const { composeFrame, updateFeed, run, heartbeatTick, clearHeartbeat, sidecarAli
 // heartbeat takeover are testable without real timers, process.exit, stdout
 // writes, or heartbeat files in the real state dir.
 function runHarness(over = {}) {
-  const w = { ticks: 0, beats: 0, yields: 0, clearedBeat: 0, scheduled: [], cleared: { interval: 0, timeout: 0 }, exited: 0, signals: [] };
+  const w = { ticks: 0, beats: 0, yields: 0, clearedBeat: 0, scheduled: [], cleared: { interval: 0, timeout: 0 }, exited: 0, signals: [], handlers: /** @type {Record<string, Function>} */ ({}) };
   const deps = {
     graceMs: 1500,
     tick: () => { w.ticks++; },
@@ -30,7 +30,7 @@ function runHarness(over = {}) {
     clearIntervalFn: () => { w.cleared.interval++; },
     clearTimeoutFn: () => { w.cleared.timeout++; },
     exit: () => { w.exited++; },
-    onSignal: (sig) => { w.signals.push(sig); },
+    onSignal: (sig, handler) => { w.signals.push(sig); w.handlers[sig] = handler; },
     ...over.deps,
     exitOnEnd: over.exitOnEnd,
   };
@@ -53,7 +53,19 @@ test('run: without --exit-on-end a session end never self-closes (tmux/standalon
   const { w } = runHarness({ exitOnEnd: false, sentinel: true });
   assert.strictEqual(w.scheduled.length, 0, 'no self-close scheduled');
   assert.strictEqual(w.exited, 0);
-  assert.deepStrictEqual(w.signals, ['SIGINT', 'SIGTERM'], 'still wired to signals');
+  // SIGUSR1 cycles the view; SIGINT/SIGTERM stop. Asserted as an exact set so a
+  // new signal handler is a deliberate change — the signal table is the
+  // sidecar's only inbound channel (it reads no stdin, by construction).
+  assert.deepStrictEqual(w.signals, ['SIGUSR1', 'SIGINT', 'SIGTERM'], 'still wired to signals');
+});
+
+test('run: SIGUSR1 advances the view and repaints immediately', () => {
+  const { w } = runHarness({ exitOnEnd: false });
+  const before = w.ticks;
+  const cycle = w.handlers && w.handlers.SIGUSR1;
+  assert.ok(typeof cycle === 'function', 'SIGUSR1 is wired to a handler');
+  cycle();
+  assert.strictEqual(w.ticks, before + 1, 'cycling repaints now rather than waiting for the next tick');
 });
 
 test('run: --exit-on-end does NOT close while the session is still live', () => {

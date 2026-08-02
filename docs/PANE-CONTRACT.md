@@ -395,3 +395,33 @@ inventory as drafted.
   shape failures into one named `invalid` state.
 - An over-long display field clamps; it no longer voids the pane as an
   oversize condition (that would have been a denial-of-display primitive).
+
+**2026-08-02 (later)** — the config surface, open since session e2994e0d, is
+ruled; the subsystem is implemented and its feature files bind.
+
+- **Location: `$XDG_CONFIG_HOME/ccr/config.json`**, defaulting to
+  `~/.config/ccr/config.json`, overridable by `CCR_CONFIG`. Not ccr's state
+  dir (`~/.ccr`), which ccr rewrites every second — user-authored text kept
+  there is one clobber from gone. **Never repo-local, and never discovered by
+  walking up from the working directory**: a config a repository could carry
+  would let anyone who lands a PR add a pane to a teammate's sidecar, which is
+  the same reasoning that removed configurable prompt files. `src/pane-config.js`
+  never consults `process.cwd()`, and a feature scenario asserts it.
+- **Format: JSON**, shape `{ "panes": [ { "path": "…" } ] }`. JSON because ccr
+  already parses JSON at every ingestion point, so this adds no parser and no
+  new attack surface, and the verifier discipline applies unchanged. Entries
+  are objects rather than bare strings so a later optional key is additive.
+  Order is cycle order; identical paths are not de-duplicated.
+- A malformed config yields **no panes**, never an exception — the economy
+  panel must survive a typo in a config file.
+- **Cycling is a signal, not a keystroke.** External panes are whole-pane
+  views selected by an index the host advances via `SIGUSR1` (`ccr cycle-view`,
+  bound to F3 by the launcher). The sidecar still reads no stdin, so the
+  structural invariant holds; a signal carries no payload, so there is nothing
+  to inject. The pid is taken from the heartbeat and guarded by freshness plus
+  a signal-0 probe — see `src/cycle-view.js` for the residual risk it does
+  *not* close, stated rather than hidden.
+- **A broken blob's rows are not validated**, only required to be an array.
+  Validating rows ccr has already promised to ignore would let a stray row turn
+  a producer's honest failure report into `invalid`, burying the message the
+  blob exists to deliver.

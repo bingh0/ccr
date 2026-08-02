@@ -29,6 +29,8 @@ const defineDoctorWindowsSteps = require('./doctor-windows.steps');
 const defineFallbackNoWtSteps = require('./fallback-no-wt.steps');
 const defineVscodeSidecarSteps = require('./vscode-sidecar.steps');
 const defineAccountLimitsSteps = require('./account-limits.steps');
+const definePaneConfigSteps = require('./pane-config.steps');
+const definePaneBlobsSteps = require('./pane-blobs.steps');
 
 /**
  * Feature-file basename → its step definer. A feature with no entry here runs
@@ -51,4 +53,6 @@ module.exports = {
   'fallback-no-wt': defineFallbackNoWtSteps,
   'vscode-sidecar': defineVscodeSidecarSteps,
   'account-limits': defineAccountLimitsSteps,
+  'pane-config': definePaneConfigSteps,
+  'pane-blobs': definePaneBlobsSteps,
 };

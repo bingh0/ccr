@@ -9,6 +9,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { freshDir, SAMPLE, tmpFile, toolLine, append } = require('./_win-helpers');
 const { composeFrame, updateFeed } = require('../../src/sidecar');
+const { cycleView, readViewRequests } = require('../../src/cycle-view');
 
 /** @param {import('../gherkin').StepRegistry} reg */
 module.exports = function defineSidecarHostingSteps(reg) {
@@ -101,6 +102,103 @@ module.exports = function defineSidecarHostingSteps(reg) {
     assert.match(w.launchSh, /if-shell -F '#\{pane_in_mode\}' 'send-keys -t \$SIDEBAR_PANE -X cancel'/, 'guarded copy-mode cancel');
   });
 
+  // View cycling: a host key signals the sidecar, which never reads input.
+  reg.define(/^it binds the view-cycle key$/, (w) => {
+    w.cycleBinding = /printf "bind-key -n \S+ run-shell '%s'[\s\S]*?RUN_CONF"/.exec(w.launchSh);
+    assert.ok(w.cycleBinding, 'the launcher emits a view-cycle binding');
+    // The binding names a generated helper inside tmux SINGLE quotes, where
+    // tmux performs no escape processing. Embedding the paths in the binding
+    // itself put them through tmux's parser AND the shell's, and escaping for
+    // both at once is how the original injection survived its first fix.
+    assert.ok(!/run-shell \\"/.test(w.cycleBinding[0]), 'the binding must not use a tmux double-quoted string');
+  });
+  reg.define(/^the key runs ccr's own cycle-view command against this profile's state dir$/, (w) => {
+    const helper = /\{\s*\n\s*printf '#!\/bin\/sh[\s\S]*?\} > "\$CYCLE_SH"/.exec(w.launchSh);
+    assert.ok(helper, 'a helper script carries the command');
+    assert.match(helper[0], /\$REPO\/bin\/ccr\.js/, "it runs ccr's own CLI, never an arbitrary command");
+    assert.match(helper[0], /cycle-view/, 'it invokes cycle-view');
+    assert.match(helper[0], /--state-dir/, 'scoped to a state dir');
+    // Every interpolated path is shell-escaped: these come from $HOME and env
+    // overrides, and an apostrophe in one used to run as a command.
+    for (const v of ['NODE', 'REPO/bin/ccr.js', 'STATE']) {
+      assert.ok(helper[0].includes(`sq "$${v}"`), `${v} is single-quote-escaped before interpolation`);
+    }
+  });
+  reg.define(/^the sidecar reads no keystroke of its own$/, () => {
+    // The structural invariant the whole design exists to preserve; enforced
+    // across the module graph by test/sidecar-capabilities.test.js.
+    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'sidecar.js'), 'utf8');
+    assert.ok(!/process\.stdin|readline/.test(src), 'the sidecar must have no input channel');
+    assert.match(src, /onSignal\('SIGUSR1'/, 'cycling arrives as a signal');
+  });
+
+  const cycleHarness = (/** @type {Record<string, any>} */ w, /** @type {string} */ beat, freshMs) => {
+    const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'ccr-cycle-'));
+    w.defer(() => fs.rmSync(dir, { recursive: true, force: true }));
+    if (beat != null) fs.writeFileSync(path.join(dir, 'sidecar-alive'), beat);
+    if (freshMs != null) {
+      const when = (Date.now() - freshMs) / 1000;
+      fs.utimesSync(path.join(dir, 'sidecar-alive'), when, when);
+    }
+    w.cycleDir = dir;
+  };
+
+  reg.define(/^a state directory an attacker can write$/, (w) => {
+    // The hostile shape that used to matter: a heartbeat naming someone else's
+    // pid. Under the request-file mechanism it is simply irrelevant, which is
+    // the point — the capability is gone rather than guarded.
+    cycleHarness(w, `${process.pid}:${Date.now()}`, 0);
+  });
+  reg.define(/^a state directory with no live sidecar$/, (w) => { cycleHarness(w, null); });
+  reg.define(/^a state directory with no view requests yet$/, (w) => { cycleHarness(w, null); });
+
+  reg.define(/^the view-cycle command runs$/, (w) => { w.cycleResult = cycleView(w.cycleDir); });
+  reg.define(/^the view-cycle command runs twice$/, (w) => {
+    w.before = readViewRequests(w.cycleDir);
+    cycleView(w.cycleDir);
+    w.cycleResult = cycleView(w.cycleDir);
+  });
+  reg.define(/^it sends no signal to any process$/, () => {
+    // Structural and absolute: there is no signalling code left to guard.
+    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'cycle-view.js'), 'utf8');
+    assert.ok(!/process\.kill|\bkill\(/.test(src), 'cycle-view must hold no signalling capability at all');
+  });
+  reg.define(/^the only thing it can change is which pane is displayed$/, (w) => {
+    // Its entire effect is one counter in one file; nothing else is touched.
+    const entries = fs.readdirSync(w.cycleDir).filter((f) => f !== 'sidecar-alive');
+    assert.deepStrictEqual(entries, ['view-request'], 'cycling writes exactly one request file');
+    assert.match(fs.readFileSync(path.join(w.cycleDir, 'view-request'), 'utf8'), /^\d+$/,
+      'the request is a counter, never a command');
+  });
+  reg.define(/^the sidecar sees two pending advances$/, (w) => {
+    assert.strictEqual(readViewRequests(w.cycleDir) - w.before, 2, 'each press records one advance');
+  });
+  reg.define(/^a sidecar that was already up to date sees none$/, (w) => {
+    const seen = readViewRequests(w.cycleDir);
+    assert.strictEqual(readViewRequests(w.cycleDir) - seen, 0, 'reading is idempotent — no phantom advances');
+  });
+  reg.define(/^the command still exits cleanly$/, (w) => {
+    assert.ok(w.cycleResult && typeof w.cycleResult.ok === 'boolean', 'a result is returned, never thrown');
+  });
+
+  reg.define(/^the view-request path is a pipe that never yields bytes$/, (w) => {
+    cycleHarness(w, null);
+    try {
+      require('node:child_process').execFileSync('mkfifo', [path.join(w.cycleDir, 'view-request')]);
+    } catch { w.skipFifo = true; }
+  });
+  reg.define(/^the sidecar checks for pending advances$/, (w) => {
+    const started = Date.now();
+    w.advances = readViewRequests(w.cycleDir);
+    w.elapsed = Date.now() - started;
+  });
+  reg.define(/^the check completes without blocking$/, (w) => {
+    assert.ok(w.elapsed < 2000, `reading the request file blocked for ${w.elapsed}ms`);
+  });
+  reg.define(/^no advance is reported$/, (w) => {
+    assert.strictEqual(w.advances, 0, 'an unreadable request file reports no advance');
+  });
+
   // Socket isolation: each instance on its own tmux server. The universal scan
   // below is the ratchet — a NEW bare `tmux` call (no -L) reintroduces the
   // shared-server single point of failure, and must fail here, not in review.
@@ -124,7 +222,7 @@ module.exports = function defineSidecarHostingSteps(reg) {
   reg.define(/^the in-pane teardown kill-session names the same socket$/, (w) => {
     // Inside the pane command string: single-quoted so the value expands at
     // launch, exactly like the '$SESSION' beside it.
-    assert.match(w.launchSh, /tmux -L '\$SOCKET' kill-session -t '\$SESSION'/, 'pane teardown targets its own socket');
+    assert.match(w.launchSh, /tmux -L '\$SOCKET_Q' kill-session -t '\$SESSION_Q'/, 'pane teardown targets its own socket');
   });
 
   // Ended (sentinel round-trip)

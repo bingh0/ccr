@@ -14,4 +14,4 @@ const path = require('node:path');
 const { runFeatures } = require('./gherkin');
 const STEP_DEFINERS = require('./steps');
 
-runFeatures(path.join(__dirname, '..', 'features'), STEP_DEFINERS, { wip: ['pane-blobs'] });
+runFeatures(path.join(__dirname, '..', 'features'), STEP_DEFINERS);

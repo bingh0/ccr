@@ -27,6 +27,11 @@ if [ -n "$PROFILE" ] && ! printf '%s' "$PROFILE" | grep -qE '^[A-Za-z0-9._-]+$';
   exit 1
 fi
 
+# Escape a value for a SINGLE-QUOTED shell context: ' becomes '\''.
+# Correct for anything we pass through `sh -c`, which is one parsing layer.
+# NOT sufficient inside a tmux config string — see the F3 binding below for why.
+sq() { printf "%s" "$1" | sed "s/'/'\\\\''/g"; }
+
 # State lives under the user's home, never world-shared /tmp; create it
 # owner-only so other local users can't read captured status.
 umask 077
@@ -83,13 +88,21 @@ cp "$REPO/sidecar/ccr.tmux.conf" "$RUN_CONF"
 # Clean re-launch.
 tmux -L "$SOCKET" kill-session -t "$SESSION" 2>/dev/null || true
 
-ENV_PREAMBLE="export CCR_STATE_DIR='$STATE'"
+# These strings are handed to `sh -c` by tmux — ONE parsing layer, so ordinary
+# shell escaping is both necessary and sufficient. $STATE and $SESSION are not
+# validated the way a profile name is (they come from $HOME and the CCR_SESSION
+# / CCR_STATE_DIR overrides), and an apostrophe in either would otherwise end
+# the quoting and run the remainder as a command.
+STATE_Q="$(sq "$STATE")"
+SESSION_Q="$(sq "$SESSION")"
+SOCKET_Q="$(sq "$SOCKET")"
+ENV_PREAMBLE="export CCR_STATE_DIR='$STATE_Q'"
 
 # Pane 0: claude/ccs with --settings. On exit, drop the sentinel then close.
 # Capture its pane id: the F2 hotkey below must target %N, never a relative
 # index (see the binding comment further down).
 CLAUDE_PANE="$(tmux -L "$SOCKET" new-session -d -P -F '#{pane_id}' -s "$SESSION" \
-  "$ENV_PREAMBLE; $CC_CMD --settings '$SETTINGS'; touch '$STATE/exited'; sleep 2; tmux -L '$SOCKET' kill-session -t '$SESSION' 2>/dev/null")"
+  "$ENV_PREAMBLE; $CC_CMD --settings '$SETTINGS'; touch '$STATE_Q/exited'; sleep 2; tmux -L '$SOCKET_Q' kill-session -t '$SESSION_Q' 2>/dev/null")"
 tmux -L "$SOCKET" set-environment -t "$SESSION" CCR_STATE_DIR "$STATE"
 
 # Pane 1: the live economy sidebar. Capture its pane id so we can scope a hook to it.
@@ -120,6 +133,43 @@ if [ -n "$CLAUDE_PANE" ]; then
   printf "bind-key -n F2 confirm-before -p 'send /clear to Claude? (y/n) ' \"send-keys -t %s '/clear' Enter\"\n" \
     "$CLAUDE_PANE" >> "$RUN_CONF"
 fi
+
+# F3 → cycle the sidebar's view (economy ⇄ each configured external pane).
+# It runs `ccr cycle-view`, which records a request the sidecar picks up on its
+# next tick; the sidecar never reads a keystroke itself, because an input
+# channel is precisely the capability the pane threat model denies it
+# (docs/PANE-CONTRACT.md). No confirm gate: cycling costs nothing and is undone
+# by pressing again.
+#
+# The paths go in a generated SCRIPT, not into the binding. $STATE, $REPO and
+# $NODE derive from $HOME, $CCR_STATE_DIR and the checkout location — none of
+# which this script validates the way it validates a profile name — and a lone
+# apostrophe in any of them used to close the quoting so the rest ran as a
+# command (reproduced 2026-08-02, and again after a first "fix").
+#
+# Shell-escaping alone is NOT enough here, which is the subtle part: a binding
+# in this file passes through TWO parsers. tmux reads the config line first and
+# processes backslashes inside its double quotes, so a shell-level '\'' arrives
+# at sh already stripped to '' — closing the quote after all. Escaping correctly
+# for both layers at once is the kind of thing that looks right and isn't.
+#
+# So: one parsing layer each. The helper script holds the paths with ordinary
+# shell quoting (sq is exactly right for that), and the config line names only
+# the helper's own mktemp path inside tmux SINGLE quotes, where tmux performs no
+# escape processing at all. If that path could itself contain a quote we bind
+# nothing rather than emit a line we cannot reason about.
+CYCLE_SH="$(mktemp "${TMPDIR:-/tmp}/ccr-cycle.XXXXXX")"
+trap 'rm -f "$RUN_CONF" "$CYCLE_SH"' EXIT
+{
+  printf '#!/bin/sh\n'
+  printf "exec '%s' '%s' cycle-view --state-dir '%s'\n" \
+    "$(sq "$NODE")" "$(sq "$REPO/bin/ccr.js")" "$(sq "$STATE")"
+} > "$CYCLE_SH"
+chmod 700 "$CYCLE_SH"
+case "$CYCLE_SH" in
+  *\'*) echo "ccr: TMPDIR contains a quote — F3 (cycle view) not bound" >&2 ;;
+  *) printf "bind-key -n F3 run-shell '%s'\n" "$CYCLE_SH" >> "$RUN_CONF" ;;
+esac
 
 tmux -L "$SOCKET" select-pane -t "$SESSION:0.0"
 tmux -L "$SOCKET" source-file -t "$SESSION" "$RUN_CONF"

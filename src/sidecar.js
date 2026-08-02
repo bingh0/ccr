@@ -17,6 +17,10 @@ const { liveness } = require('./liveness');
 const { currentTranscriptPath, readNewLines, parseEvents } = require('./transcripts');
 const { readTextCapped } = require('./safe-read');
 const { stripControl } = require('./sanitize');
+const { loadPaneConfig } = require('./pane-config');
+const { loadPaneBlob } = require('./pane-blob');
+const { renderPane } = require('./render/pane');
+const { readViewRequests } = require('./cycle-view');
 
 const STATE_DIR = process.env.CCR_STATE_DIR || path.join(os.homedir(), '.ccr');
 
@@ -173,8 +177,15 @@ function draw(/** @type {string} */ s) {
  * is clamped to it so a wide row can't soft-wrap and corrupt the cursor-home
  * redraw in a narrow cmd/PowerShell/split pane. Omit it (non-TTY) for no clamp.
  *
+ * `view` selects which whole-pane view to draw: 0 is ccr's own economy view and
+ * 1..N are the configured external panes, in config order. It is taken modulo
+ * the number of views, so an index that outlives a shrinking config wraps rather
+ * than showing nothing. External panes are FULL-HEIGHT views, never stacked
+ * beside the economy panel — one pane, one subject.
+ *
  * @param {string} stateDir
- * @param {{ now?: number, cols?: number }} [opts]
+ * @param {{ now?: number, cols?: number, rows?: number, view?: number,
+ *   panes?: Array<{path: string, source: string}> }} [opts]
  * @returns {string}
  */
 function composeFrame(stateDir, opts = {}) {
@@ -188,6 +199,35 @@ function composeFrame(stateDir, opts = {}) {
   const exited = path.join(stateDir, 'exited');
 
   if (fs.existsSync(exited)) return clamp(bold('ccr') + '  ' + dim('session ended') + '\n');
+
+  // External panes. Config is re-read per tick so adding a pane needs no
+  // relaunch, and it is best-effort: a broken config costs the panes, never the
+  // panel (loadPaneConfig is total — see src/pane-config.js).
+  const panes = opts.panes || loadPaneConfig().panes;
+  const viewCount = 1 + panes.length;
+  const view = ((Math.trunc(opts.view || 0) % viewCount) + viewCount) % viewCount;
+  if (view > 0) {
+    const pane = panes[view - 1];
+    // Guarded like the economy branch below: "a malformed file must cost a pane
+    // state, never the sidecar" is the contract's rule, and leaving it to rest
+    // on the renderer never throwing would make it one careless edit from false.
+    try {
+      const res = loadPaneBlob(pane.path, { now });
+      return clamp(renderPane(res, {
+        source: pane.source,
+        position: `${view + 1}/${viewCount}`,
+        width: typeof cols === 'number' && cols > 0 ? cols : 48,
+        // Rows the body may use: the pane's height less the chrome (title,
+        // basis, blank) and a line of breathing room. Without this the overflow
+        // collapse in renderPane is unreachable, and a long blob silently
+        // scrolls the pane — which is exactly what obligation 8 forbids.
+        maxRows: Math.max(1, (opts.rows || resolveRows() || 24) - 4),
+      }) + '\n');
+    } catch (e) {
+      const msg = stripControl(e && e instanceof Error ? e.message : String(e)) || 'unknown';
+      return clamp(dim('ccr · pane render error: ' + msg.slice(0, 120)) + '\n');
+    }
+  }
   // Capped, regular-files-only read: a fifo here would block this synchronous
   // loop forever and an unbounded file can blank the panel (see src/safe-read.js).
   const raw = readTextCapped(snapshot) || '';
@@ -202,6 +242,9 @@ function composeFrame(stateDir, opts = {}) {
     // strictly guarded so a different account is never mixed in.
     const reconciled = { ...state, rate_limits: freshenAccountLimits(state.rate_limits, stateDir) };
     out = renderEconomy(normalizeStatus(reconciled), { tick: Math.floor(now / 1000) % 2 === 0 });
+    // ccr's own view is position 1 of the cycle. Shown only when there is a
+    // cycle to be in — a lone economy view has no position worth naming.
+    if (viewCount > 1) out = out.replace(/\n/, dim(`   1/${viewCount}`) + '\n');
   } catch (e) {
     // Sanitize and bound the message: it is the one error surface that prints
     // text ccr did not author, and an exception string can quote the input that
@@ -255,10 +298,45 @@ function resolveCols() {
   return haveLive ? live : undefined;
 }
 
-function frame() {
-  // Read columns each tick so a live resize re-flows on the next frame.
-  draw(composeFrame(STATE_DIR, { now: Date.now(), cols: resolveCols() }));
+/** The pane's height, for the row budget. Unknown (non-TTY) → undefined. */
+function resolveRows() {
+  const live = process.stdout.rows;
+  return typeof live === 'number' && live > 0 ? live : undefined;
 }
+
+// Which whole-pane view is showing. composeFrame takes it modulo the view
+// count, so it never needs clamping here.
+let currentView = 0;
+// Advance-requests already applied. The host's key writes a counter (see
+// src/cycle-view.js) and we consume the DIFFERENCE, so a burst of presses
+// advances by the number pressed and none is lost between ticks.
+let seenRequests = null;
+
+/**
+ * One tick: consume any pending advance-requests, then paint.
+ * The seams exist so a test can observe what reaches composeFrame — without
+ * them, "the view index actually reaches the frame" is unobservable, and both
+ * halves of the cycling wiring can be broken with the suite still green.
+ * @param {{ stateDir?: string, compose?: Function, paint?: Function }} [deps]
+ */
+function frame(deps = {}) {
+  const stateDir = deps.stateDir || STATE_DIR;
+  const compose = deps.compose || composeFrame;
+  const paint = deps.paint || draw;
+  const requests = readViewRequests(stateDir);
+  if (seenRequests == null) seenRequests = requests;      // adopt on first tick
+  else if (requests !== seenRequests) {
+    currentView += Math.max(0, requests - seenRequests);
+    seenRequests = requests;
+  }
+  // Read columns and rows each tick so a live resize re-flows on the next frame.
+  paint(compose(stateDir, {
+    now: Date.now(), cols: resolveCols(), rows: resolveRows(), view: currentView,
+  }));
+}
+
+/** Test seam: reset the cycling state between scenarios (module-level by design). */
+function __resetViewState() { currentView = 0; seenRequests = null; }
 
 /**
  * The live loop. With `exitOnEnd` (the Windows launcher passes `--exit-on-end`),
@@ -342,6 +420,13 @@ function run(opts = {}) {
   };
   loop();
   id = setIntervalFn(loop, pollMs);
+  // SIGUSR1 also advances the view, for anyone who can already signal this
+  // process (`kill -USR1 $(pgrep -f 'ccr.js sidecar')`). The KEY binding does
+  // not use it: routing a keypress through a pid read out of a writable file
+  // turned a cosmetic hotkey into an arbitrary-kill primitive, so the host
+  // writes a request file instead (see src/cycle-view.js). Cycling still never
+  // reaches stdin, which is the invariant that matters.
+  onSignal('SIGUSR1', () => { currentView += 1; tick(); });
   onSignal('SIGINT', stop);
   onSignal('SIGTERM', stop);
   return stop;
@@ -351,4 +436,7 @@ function run(opts = {}) {
 // session-switch reset and the ended/waiting/render states are the subtle
 // parts); the live loop uses `run`. The heartbeat trio is exported for tests
 // and for the VS Code launcher's `sidecarAlive` check.
-module.exports = { run, updateFeed, composeFrame, heartbeatTick, clearHeartbeat, sidecarAlive };
+module.exports = {
+  run, updateFeed, composeFrame, heartbeatTick, clearHeartbeat, sidecarAlive,
+  frame, __resetViewState,
+};

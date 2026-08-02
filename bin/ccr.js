@@ -83,9 +83,25 @@ function main(argv) {
     case 'statusline': return cmdStatusline();
     case 'sidecar': return cmdSidecar(values['state-dir'], !!values.hint, !!values['exit-on-end']);
     case 'doctor': return require('../src/doctor').run();
+    case 'cycle-view': return cmdCycleView(values['state-dir']);
     case 'launch': return cmdLaunch(positionals[1]);
     default: return cmdLaunch(cmd);               // anything else → treat as a CCS profile
   }
+}
+
+/**
+ * `ccr cycle-view` — show the running sidecar's next view. Bound to a key by
+ * the launcher; the sidecar itself reads no input (see src/cycle-view.js).
+ * Always exits 0: a keypress that finds no live sidecar is a no-op, not an
+ * error worth painting over the user's terminal.
+ * @param {string|undefined} stateDirFlag
+ * @returns {number}
+ */
+function cmdCycleView(stateDirFlag) {
+  const stateDir = stateDirFlag || process.env.CCR_STATE_DIR
+    || require('node:path').join(require('node:os').homedir(), '.ccr');
+  require('../src/cycle-view').cycleView(stateDir);
+  return 0;
 }
 
 function readStdin() {

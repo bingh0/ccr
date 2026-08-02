@@ -55,6 +55,53 @@ Feature: Live sidecar hosting
     Then it captures the new pane id with "-P -F '#{pane_id}'" into SIDEBAR_PANE
     And it sets a pane-scoped pane-mode-changed hook that cancels copy-mode only while the pane is in a mode
 
+  # --- Cycling views without giving the sidecar an input channel ---
+
+  @security
+  Scenario: The view is cycled by a host key, never by the sidecar reading input
+    # The sidecar renders untrusted blob content, so it must hold no input
+    # channel — that is a structural invariant, not a preference. Cycling
+    # therefore arrives from a host key, the same division of labour as the
+    # clear hotkey: the host owns the key, ccr owns the behaviour.
+    Given the tmux launcher script scripts/launch.sh
+    When it binds the view-cycle key
+    Then the key runs ccr's own cycle-view command against this profile's state dir
+    And the sidecar reads no keystroke of its own
+
+  @security
+  Scenario: Cycling holds no capability beyond changing which pane is shown
+    # The first implementation read the sidecar's pid from its heartbeat and
+    # sent SIGUSR1 — whose default disposition is to terminate. Because that
+    # file is writable by anything running as the user, naming a victim's pid
+    # in it turned a cosmetic hotkey into a kill primitive (reproduced).
+    # No guard fixes that, since pid and freshness both come from the attacker's
+    # own file, so the mechanism is a request the sidecar reads instead.
+    Given a state directory an attacker can write
+    When the view-cycle command runs
+    Then it sends no signal to any process
+    And the only thing it can change is which pane is displayed
+
+  Scenario: A recorded request advances the view exactly once per press
+    Given a state directory with no view requests yet
+    When the view-cycle command runs twice
+    Then the sidecar sees two pending advances
+    And a sidecar that was already up to date sees none
+
+  Scenario: Cycling with no sidecar running is a quiet no-op
+    Given a state directory with no live sidecar
+    When the view-cycle command runs
+    Then the command still exits cleanly
+
+  @security
+  Scenario: The request file is read under the safe-read rules
+    # It lives in the same writable directory as everything else here, so a
+    # fifo planted at that path would hang whichever process read it — and
+    # under tmux run-shell every keypress would leak another hung process.
+    Given the view-request path is a pipe that never yields bytes
+    When the sidecar checks for pending advances
+    Then the check completes without blocking
+    And no advance is reported
+
   Scenario: Concurrent profiles are isolated on per-profile tmux sockets
     # All instances used to share the default tmux server — a single point of
     # failure. One kill-server (2026-08-02: an agent inside one instance ran
