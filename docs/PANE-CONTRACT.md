@@ -370,8 +370,10 @@ human or their agent runs the producing command themselves.
   gt can name as dark/withheld/absent appears as a row (binding, fence,
   heat incl. withheld, exceptions/degradation); further rows are producer
   discretion. Conformance is pinned in its `features/design/` tier.
-- Producer (planned): `treecontext` — blob beside its store; basis moment to
-  be ruled by its own contract (hook-drain time is the candidate).
+
+Other producers need no registration here: any tool that writes a conforming
+blob and gets wired in by user config is a producer. ccr's obligations do not
+change per producer, so this list is illustrative, not an interface.
 
 ## Ruling log
 
@@ -425,3 +427,23 @@ ruled; the subsystem is implemented and its feature files bind.
   Validating rows ccr has already promised to ignore would let a stray row turn
   a producer's honest failure report into `invalid`, burying the message the
   blob exists to deliver.
+
+**2026-08-02 (post-review)** — two amendments.
+
+- **Supersedes the cycling bullet above.** Cycling is a request file, not a
+  signal. The SIGUSR1 design was reproduced as a kill primitive: the pid came
+  from the heartbeat file, the heartbeat lives in a directory anything running
+  as the user can write, and SIGUSR1's default disposition is terminate — so a
+  planted "<victim_pid>:<now>" aimed the cosmetic hotkey at any process of the
+  attacker's choosing. No guard fixes a pid whose value and freshness both
+  come from the attacker's own file. Instead `ccr cycle-view` bumps a
+  monotonic counter in `<stateDir>/view-request`; the sidecar reads the
+  difference each tick and advances by that many views (≤1s latency).
+  `src/cycle-view.js` contains no signalling code at all, and a feature
+  scenario asserts that structurally. Forging the request file now buys an
+  attacker exactly what the hotkey buys the user: a different pane on screen.
+- **The producer list is illustrative, not an interface.** The "planned
+  producer" entry is removed from "Known consumers and producers": ccr
+  neither knows nor needs to know who produces blobs. Any tool that writes a
+  conforming blob and gets wired in by user config is a producer; ccr's
+  obligations never vary per producer, so nothing registers here.
