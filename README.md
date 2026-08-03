@@ -24,6 +24,9 @@ shows you the **economy** of a session:
 - **Resume advisor** (`ccr resume`) — recent sessions ranked by what they'd cost
   to bring back (context size, share of the window, cold/warm cache), then it
   hands selection to `claude --resume`.
+- **External tool panes** — the sidebar can render read-only status panes from
+  other tools via a strict JSON contract; **F3** cycles between the economy
+  panel and each configured pane (see [External tool panes](#external-tool-panes-sidebar)).
 
 For scripting and external tools (status bars, menu-bar widgets), `ccr economy
 --json` emits a stable, versioned model — see
@@ -106,6 +109,34 @@ In `~/.claude/settings.json`:
 (Install the binary with `npm i -g claude-code-runrate` rather than using `npx` here — Claude
 Code calls the status line frequently, and a resolved binary avoids per-tick
 latency.)
+
+## External tool panes (sidebar)
+
+The live sidebar can host **read-only panes from other tools**. A tool writes a
+small JSON blob beside its own artifacts; you list that file's path in ccr's
+config; the sidebar cycles between the economy panel and each configured pane
+(**F3** under tmux — the launcher binds it; `ccr cycle-view` on any host).
+
+Config lives at `~/.config/ccr/config.json` (`$XDG_CONFIG_HOME` respected,
+`CCR_CONFIG` overrides) — deliberately *not* in ccr's state dir, and never
+read from a repository:
+
+```json
+{ "panes": [ { "path": "/home/you/project/.your-tool/sidecar.json" } ] }
+```
+
+- ccr **reads the file, validates it, renders it** — that is the entire
+  integration. No subprocess, no plugin code, no schema knowledge of the
+  producing tool: a pane is data all the way down, and every blob string is
+  stripped of control bytes before it touches your terminal.
+- **Producers never know ccr exists.** You wire the join by hand, exactly like
+  Claude Code's own `statusLine` — neither side takes a dependency on the other.
+- A malformed config yields no panes and a malformed blob renders as a **named
+  error state** — never a crash, never a misrender.
+- The blob format is specified in
+  [`docs/PANE-CONTRACT.md`](docs/PANE-CONTRACT.md), with a golden example at
+  [`docs/pane-blob.golden.json`](docs/pane-blob.golden.json). Anything that
+  writes a conforming blob is a producer — there is no registry.
 
 ## Development
 
