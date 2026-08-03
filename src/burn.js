@@ -131,11 +131,15 @@ function clearROI(o) {
     return { boughtMinutes: 0, projectedBurn: o.rate };
   }
   let ratio;
-  if (o.calib) {
-    const w = (x) => Math.max(o.calib.a * x + o.calib.b, 1e-9);
+  // Bind the calibration outside the closure: narrowing does not survive into a
+  // function body (the callback could in principle run after o.calib changed),
+  // and binding it also means the reader need not reason about reentrancy.
+  const calib = o.calib;
+  if (calib) {
+    const w = (/** @type {number} */ x) => Math.max(calib.a * x + calib.b, 1e-9);
     ratio = w(o.baselineB) / w(o.contextC);
   } else {
-    const w = (x) => READ_WEIGHT * x + K_TAIL;
+    const w = (/** @type {number} */ x) => READ_WEIGHT * x + K_TAIL;
     ratio = w(o.baselineB) / w(o.contextC);
   }
   // A clear can't shed the output/write tail or the retained baseline, so burn

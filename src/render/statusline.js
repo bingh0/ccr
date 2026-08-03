@@ -14,6 +14,9 @@ function renderStatusline(view) {
   const parts = [];
   if (view.model) parts.push(view.model);
 
+  // Annotated because Array.isArray does not narrow an `any`: without this the
+  // whole chain below decays to `any` and the row callbacks lose their types.
+  /** @type {any[]} */
   const windows = Array.isArray(view.windows) ? view.windows : [];
   if (!windows.length) {
     parts.push('API · no limits');

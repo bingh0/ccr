@@ -82,6 +82,7 @@ function run(opts = {}) {
 
   const ccs = hasFn('ccs');
   if (ccs) {
+    /** @type {string[]} */
     let profiles = [];
     try { profiles = fs.readdirSync(path.join(homedir, '.ccs', 'instances')).filter((p) => !p.startsWith('.')); } catch { /* none */ }
     // Profile + path come from the filesystem; sanitize before display.
@@ -106,6 +107,7 @@ function run(opts = {}) {
   }
   if (newest) {
     const ageMin = Math.round((Date.now() - newest.m) / 60000);
+    /** @type {string[]} */
     let keys = [];
     try { keys = Object.keys(JSON.parse(fs.readFileSync(path.join(newest.d, 'last-status.json'), 'utf8')).rate_limits || {}); } catch { /* ignore */ }
     // Defense-in-depth: sanitize the dir + bucket keys before display even

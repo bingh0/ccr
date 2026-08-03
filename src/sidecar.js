@@ -310,6 +310,7 @@ let currentView = 0;
 // Advance-requests already applied. The host's key writes a counter (see
 // src/cycle-view.js) and we consume the DIFFERENCE, so a burst of presses
 // advances by the number pressed and none is lost between ticks.
+/** @type {number|null} */
 let seenRequests = null;
 
 /**
@@ -390,7 +391,9 @@ function run(opts = {}) {
   const RENDER_MS = 1000;
   const pollMs = exitOnEnd ? 120 : RENDER_MS;
 
+  /** @type {ReturnType<typeof setInterval>|null} */
   let id = null;
+  /** @type {ReturnType<typeof setTimeout>|null} */
   let endTimer = null;
   let sinceRender = RENDER_MS; // render on the first loop
   const teardown = (/** @type {boolean} */ clearHb) => {

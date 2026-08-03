@@ -38,6 +38,9 @@ function band(min) {
  * @returns {{ rows: any[], next: any }}
  */
 function classifyWindows(view) {
+  // Annotated because Array.isArray does not narrow an `any`: without this the
+  // whole chain below decays to `any` and the row callbacks lose their types.
+  /** @type {any[]} */
   const windows = Array.isArray(view.windows) ? view.windows : [];
   const rows = windows.map((/** @type {any} */ wd) => {
     const est = windowEstimate({ usedPct: wd.usedPct, rate: wd.rate, minutesToReset: wd.minutesToReset, windowMinutes: wd.windowMinutes });
