@@ -16,10 +16,20 @@ const { stripControl } = require('./sanitize');
 const FIVE = 300, WEEK = 10080, MONTH = 43200;
 
 // Known keys get exact labels/windows; everything else falls back to heuristics.
-const KNOWN = {
+//
+// NULL PROTOTYPE, deliberately: bucket names arrive from the status JSON, so a
+// bucket named `toString`, `constructor`, or `__proto__` must MISS this table
+// and fall through to the heuristics below. A plain object literal inherits
+// those names from Object.prototype and hands back a function, whose `.label`
+// is undefined — so labelFor would return undefined while its own contract
+// promises a string. That only stayed harmless because every consumer happens
+// to write `wd.label || wd.key`; a consumer trusting the declared type would
+// break. Structural fix rather than a guard at each lookup.
+/** @type {Record<string, { label: string, windowMinutes: number }>} */
+const KNOWN = Object.assign(Object.create(null), {
   five_hour: { label: '5h', windowMinutes: FIVE },
   seven_day: { label: 'weekly', windowMinutes: WEEK },
-};
+});
 
 /** @param {string} key → 'Sonnet' | 'Opus' | 'Haiku' | null */
 function modelScope(key) {

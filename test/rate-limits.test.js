@@ -49,3 +49,29 @@ test('an unknown bucket still surfaces (renders even without an inferable window
   assert.strictEqual(ws[0].windowMinutes, null);
   assert.strictEqual(ws[0].minutesToReset, null);
 });
+
+test('a bucket named after an Object.prototype member is treated as unknown', () => {
+  // Verified defect: the known-key table was a plain object literal, so
+  // `KNOWN['toString']` found the inherited function, `.label` was undefined,
+  // and labelFor returned undefined while its contract promises a string. Every
+  // consumer happened to write `wd.label || wd.key`, so it never surfaced — but
+  // the declared type said `label: string` and the next consumer would trust it.
+  // JSON.parse is what makes these OWN enumerable keys, so Object.keys sees them.
+  const hostile = JSON.parse(
+    '{"toString":{"used_percentage":50},"constructor":{"used_percentage":10},'
+    + '"__proto__":{"used_percentage":20},"valueOf":{"used_percentage":30}}',
+  );
+  const ws = discoverWindows(hostile, 1000);
+
+  assert.strictEqual(ws.length, 4, 'every bucket surfaces');
+  for (const w of ws) {
+    assert.strictEqual(typeof w.label, 'string', `${w.key} must have a string label`);
+    assert.ok(w.label.length > 0, `${w.key} label must not be empty`);
+    // None of these is a known key, so none may claim a known window length.
+    assert.strictEqual(w.windowMinutes, null, `${w.key} must not inherit a window`);
+  }
+  // And the genuinely known keys still resolve through the same table.
+  const known = discoverWindows({ five_hour: { used_percentage: 1 } }, 1000);
+  assert.strictEqual(known[0].label, '5h');
+  assert.strictEqual(known[0].windowMinutes, 300);
+});
