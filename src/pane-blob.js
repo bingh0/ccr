@@ -217,9 +217,16 @@ function validateBlob(input) {
 function loadPaneBlob(file, opts = {}) {
   const read = readBlobFile(file);
   if (!read.ok) {
-    return read.state === 'cannot-read'
-      ? { state: 'cannot-read', reason: /** @type {any} */ (read).reason }
-      : { state: read.state };
+    // `strict` is off in jsconfig.json, and without strictNullChecks TypeScript
+    // will not narrow this union by its boolean `ok` discriminant — the whole
+    // union survives into this branch. So name the failure shape once here
+    // instead of re-testing it at runtime: the runtime predicate stays `ok`,
+    // which is the property readBlobFile actually guarantees, and this replaces
+    // the `any` cast that was already covering the same gap for `reason`.
+    const fail = /** @type {{ ok: false, state: string, reason?: string }} */ (read);
+    return fail.state === 'cannot-read'
+      ? { state: 'cannot-read', reason: fail.reason }
+      : { state: fail.state };
   }
   if (!read.text.trim()) return { state: 'waiting' };
 
