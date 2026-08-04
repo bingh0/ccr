@@ -125,12 +125,37 @@ read from a repository:
 { "panes": [ { "path": "/home/you/project/.your-tool/sidecar.json" } ] }
 ```
 
+A pane is a full-height view carrying the producing tool's own rows — here
+`gherkin-trace`, whose blob ships as the golden example:
+
+```
+trace  gherkin-trace   2/2
+  refresh · 2026-08-01 14:10 · blob written 0s
+
+  ● attention     3   1 breach, 2 orphans
+  ● reviewed      8
+  ◌ heat          withheld   no natural break
+  ◌ binding       dark   no run manifest
+  ● fence         clean  ▁▅▂█
+  ● exceptions    0
+  · experimental  off
+```
+
 - ccr **reads the file, validates it, renders it** — that is the entire
   integration. No subprocess, no plugin code, no schema knowledge of the
   producing tool: a pane is data all the way down, and every blob string is
   stripped of control bytes before it touches your terminal.
 - **Producers never know ccr exists.** You wire the join by hand, exactly like
   Claude Code's own `statusLine` — neither side takes a dependency on the other.
+- **Config order is cycle order.** F3 goes economy panel → first pane → second
+  pane → back to economy; the `2/2` above is that position. Entries are never
+  de-duplicated, so listing one path twice gives you two panes. The config is
+  re-read every tick — adding a pane takes effect without relaunching.
+- **The producer is trusted for content, never for behaviour.** ccr executes
+  nothing from a blob and draws no value it has not validated, so a hostile file
+  cannot crash the panel or escape into your terminal — but what a pane *says*
+  is the producing tool's word, not ccr's. Point it only at files you would read
+  yourself.
 - A malformed config yields no panes and a malformed blob renders as a **named
   error state** — never a crash, never a misrender.
 - The blob format is specified in
