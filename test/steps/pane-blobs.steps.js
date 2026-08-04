@@ -522,7 +522,7 @@ module.exports = function definePaneBlobsSteps(reg) {
   });
   reg.define(/^the pane shows the cannot-read state naming the path$/, (w) => {
     assert.match(w.plain, /cannot read/);
-    assert.ok(w.plain.includes(w.source));
+    assert.ok(namesSource(w.plain, w.source), 'the configured path is named');
   });
   reg.define(/^the sidecar never opens the symlink's target$/, (w) => {
     // The target is a perfectly valid blob; if it were followed, its content
@@ -535,7 +535,7 @@ module.exports = function definePaneBlobsSteps(reg) {
   });
   reg.define(/^the pane shows an oversized state naming the path$/, (w) => {
     assert.match(w.plain, /oversized/);
-    assert.ok(w.plain.includes(w.source));
+    assert.ok(namesSource(w.plain, w.source), 'the configured path is named');
   });
   reg.define(/^the file's content is not rendered$/, (w) => {
     assert.ok(!w.plain.includes('gherkin-trace'), 'oversized content leaked');
