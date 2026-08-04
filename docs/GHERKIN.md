@@ -13,8 +13,13 @@ it is still small enough to read in one sitting and to vendor as a single file.
 canonical, standalone home; use it directly in other projects. The copy here
 keeps ccr's suite running on a bare `node --test` with zero install.
 
-**Scope of this document.** It describes the half of the file ccr actually
-uses: the runner. The vendored copy also carries a feature-file **linter**
+**Scope of this document.** It describes the *tool* — the half of the vendored
+file ccr actually uses: the runner. For ccr's own acceptance-criteria
+**practice** — what it took from conventional BDD, where it departed, and why —
+see [BDD.md](BDD.md). The split is deliberate: this file mirrors an upstream
+package, and ccr's policy is not the runner's semantics.
+
+Of the runner itself, this page covers The vendored copy also carries a feature-file **linter**
 (`lintFeature`), a **run manifest**, and `bindRunner` — shipped with the file,
 not wired up here. For those, and for the authoritative account of everything
 below, read the upstream README; this page is kept to what ccr relies on so it

@@ -176,6 +176,13 @@ canonical source; `test/gherkin.js` is a vendored copy). See
 [`docs/GHERKIN.md`](docs/GHERKIN.md) for the grammar, the deliberate limits,
 and the API.
 
+The *practice* is documented separately in [`docs/BDD.md`](docs/BDD.md): what
+these 154 scenarios took from conventional BDD, where they departed — refusals
+as a quarter of the specification, tags that are gates rather than filters,
+comments that carry rulings — and why. It also places ccr in the lineage the
+method has followed since, and is honest about which point on that line this
+repository represents.
+
 ```bash
 npm test            # node --test — harness self-tests + feature scenarios
 npm run typecheck   # tsc --noEmit over @ts-check'd JS (needs: npm i first)
