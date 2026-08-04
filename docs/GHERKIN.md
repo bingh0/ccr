@@ -4,16 +4,21 @@ A **targeted** tool: it runs Gherkin (`.feature`) acceptance tests in plain
 JavaScript with **zero npm dependencies and no build step**, on top of the
 runtime's built-in test runner (`node:test` under Node; natively `bun:test`
 under Bun; Deno's `node:test` bridge under Deno — ccr itself runs it on Node).
-In ccr it executes the criteria in [`features/`](../features/). At ~730 lines
-(a third of which is documentation) it's one of the smallest practical Gherkin
-runners you'll find — small enough to read in one sitting, and small enough to
-vendor as a single file.
+In ccr it executes the criteria in [`features/`](../features/). At ~1,700 lines
+it is still small enough to read in one sitting and to vendor as a single file.
 
-`test/gherkin.js` is a vendored copy of
-[`gherkin-node-test`](https://github.com/bingh0/gherkin-node-test)
-([npm](https://www.npmjs.com/package/gherkin-node-test)) — that package is the
+`test/gherkin.js` is a vendored copy of **gherkin-node-test 0.9.0**
+([source](https://github.com/bingh0/gherkin-node-test),
+[npm](https://www.npmjs.com/package/gherkin-node-test)) — that package is the
 canonical, standalone home; use it directly in other projects. The copy here
 keeps ccr's suite running on a bare `node --test` with zero install.
+
+**Scope of this document.** It describes the half of the file ccr actually
+uses: the runner. The vendored copy also carries a feature-file **linter**
+(`lintFeature`), a **run manifest**, and `bindRunner` — shipped with the file,
+not wired up here. For those, and for the authoritative account of everything
+below, read the upstream README; this page is kept to what ccr relies on so it
+stays true without tracking every upstream release.
 
 It exists because the alternative — pulling in `@cucumber/gherkin` + a Vitest/Jest
 binding — would add a dependency tree and a build step to a tool whose whole
@@ -117,7 +122,7 @@ sentences in two features may legitimately bind to different definitions.
 | `<placeholder>` | substituted from the Examples columns — in step text **and** in step data tables; every `<name>` must match a column |
 | Steps | `Given` `When` `Then` `And` `But` `*`, followed by step text |
 | Step data tables | `\|` rows after a step attach to that step; the step function receives a **`DataTable`** as its last argument |
-| Tags | `@skip` never runs the scenario (steps must still bind); `@todo` registers it but never gates; tags on `Feature:` apply to all its scenarios; any other tag (e.g. `@AC3`) is carried on `scenario.tags` but has no runtime effect |
+| Tags | `@skip` never runs the scenario (steps must still bind); `@todo` runs it as xfail — failing gates nothing, *passing* reds the run as a stale tag; tags on `Feature:` apply to all its scenarios; any other tag (e.g. `@AC3`) is carried on `scenario.tags` but has no runtime effect |
 | `# comment` | ignored anywhere |
 | Feature narrative | the `As a… / I want… / So that…` prose block is ignored |
 
@@ -125,9 +130,15 @@ Table cells honor the Gherkin escapes `\|` (literal pipe), `\\` (literal
 backslash) and `\n` (newline); a backslash before any other character is
 literal, so cells like `C:\Temp` or `Cmd+\` need no escaping.
 
-Tag semantics on the runner side: `@skip` never executes the scenario;
-`@todo` executes it but its failures don't fail the run (`node:test` TODO
-semantics). `@only` is **rejected** as a registered failing test: focus
+Tag semantics on the runner side: `@skip` never executes the scenario.
+`@todo` is **inverted** (xfail) as of 0.9.0 and behaves identically on every
+runtime: the scenario runs as a plain test, and while it fails, the failure is
+printed but gates nothing. The run that would first turn it *green* goes red
+instead, naming the stale tag — so a paid-off `@todo` cannot hide, and the only
+exit is deleting the tag in a one-line reviewed diff. (Before 0.9.0 the runtimes
+disagreed: Node reported a failing todo as passing, Bun ran todo bodies only
+under `--todo`, and Deno never ran them at all.) ccr carries no `@todo`
+scenarios. `@only` is **rejected** as a registered failing test: focus
 semantics differ irreconcilably across runtimes (Node: inert without
 `--test-only`; Bun/Deno: focuses its file on every run, and Deno exits 0 — a
 committed `@only` would silently narrow a CI run). Focus one scenario with the
@@ -246,6 +257,12 @@ try {
 }
 ```
 
+An **ambiguous** step — one matching two registered bindings — fails its
+scenario before any step runs, naming the step and every matching pattern.
+Ambiguity is detected at registration, so it outranks `@skip` and `@todo`: a
+binding defect is never parked or worn as declared debt. (Before 0.9.0 the
+first match simply ran, silently.)
+
 Undefined steps are *not* a parse error — they're reported by the low-level
 runner as node:test **TODO** entries, so feature files are runnable before their
 steps exist and go green as steps land. Under `runFeatures()` that bootstrapping
@@ -257,7 +274,7 @@ silent coverage hole).
 
 | Export | Purpose |
 |---|---|
-| `runFeatures(dir, definers, { wip }?)` | **high-level runner**: discover every `.feature`, scoped registries, guard tests |
+| `runFeatures(dir, definers, { wip, manifest }?)` | **high-level runner**: discover every `.feature`, scoped registries, guard tests. A missing directory, a non-directory path, and a directory with no `.feature` files each fail the run with a test naming the path — never a silently green zero-scenario run. ccr passes no `manifest` |
 | `parseFeature(text, filename?)` | parse → `{ feature, background, scenarios }`; throws `GherkinSyntaxError` |
 | `StepRegistry` | `.define(pattern, fn)` / `.find(text)` |
 | `executeSteps(steps, registry, world?)` | run a flat step list against a shared world (installs `world.defer`) |

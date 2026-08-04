@@ -76,10 +76,16 @@ test('executeSteps runs background + scenario against a shared world', async () 
   assert.strictEqual(world.count, 5);
 });
 
+// These steps are built by hand rather than parsed, so `line` is positional and
+// not a claim about any file. The Step type requires it — the parser always
+// knows it, and the linter and run manifest both read it — but executeSteps
+// never does: verified against 0.9.0, the thrown message is byte-identical with
+// no line, with 1, and with 42. It is carried here to satisfy the type
+// honestly, not to change behaviour.
 test('executeSteps throws on an undefined step', async () => {
   const reg = new StepRegistry();
   await assert.rejects(
-    () => executeSteps([{ keyword: 'Given', text: 'something undefined' }], reg),
+    () => executeSteps([{ keyword: 'Given', text: 'something undefined', line: 1 }], reg),
     /Undefined step: something undefined/,
   );
 });
@@ -246,8 +252,8 @@ test('deferred cleanup runs LIFO after the steps', async () => {
   /** @type {string[]} */ const order = [];
   reg.define(/^acquire (\w+)$/, (w, name) => { w.defer(() => { order.push(name); }); });
   await executeSteps([
-    { keyword: 'Given', text: 'acquire outer' },
-    { keyword: 'And', text: 'acquire inner' },
+    { keyword: 'Given', text: 'acquire outer', line: 1 },
+    { keyword: 'And', text: 'acquire inner', line: 2 },
   ], reg);
   assert.deepStrictEqual(order, ['inner', 'outer']);
 });
@@ -258,7 +264,7 @@ test('cleanup still runs when a step fails, and the step error wins', async () =
   reg.define('setup', (w) => { w.defer(() => { cleaned = true; throw new Error('cleanup also failed'); }); });
   reg.define('boom', () => { throw new Error('step failed'); });
   await assert.rejects(
-    () => executeSteps([{ keyword: 'Given', text: 'setup' }, { keyword: 'When', text: 'boom' }], reg),
+    () => executeSteps([{ keyword: 'Given', text: 'setup', line: 1 }, { keyword: 'When', text: 'boom', line: 2 }], reg),
     /step failed/,
   );
   assert.ok(cleaned, 'deferred cleanup must run despite the step failure');
@@ -268,7 +274,7 @@ test('a cleanup error surfaces when the steps themselves passed', async () => {
   const reg = new StepRegistry();
   reg.define('setup', (w) => { w.defer(() => { throw new Error('leak detected'); }); });
   await assert.rejects(
-    () => executeSteps([{ keyword: 'Given', text: 'setup' }], reg),
+    () => executeSteps([{ keyword: 'Given', text: 'setup', line: 1 }], reg),
     /leak detected/,
   );
 });
