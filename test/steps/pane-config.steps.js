@@ -173,7 +173,12 @@ module.exports = function definePaneConfigSteps(reg) {
   reg.define(/^the configuration path is a pipe that never yields bytes$/, (w) => {
     const d = tmp(w);
     const p = path.join(d, 'config.json');
-    try { execFileSync('mkfifo', [p]); } catch { w.skipFifo = true; }
+    // Same guard as pane-blobs.steps.js: MSYS mkfifo on Windows exits 0 without
+    // creating a FIFO, so the command succeeding proves nothing.
+    try {
+      execFileSync('mkfifo', [p]);
+      if (!fs.lstatSync(p).isFIFO()) w.skipFifo = true;
+    } catch { w.skipFifo = true; }
     w.env = { CCR_CONFIG: p };
   });
   reg.define(/^loading completes without blocking$/, (w) => {

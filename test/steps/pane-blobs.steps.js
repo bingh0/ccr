@@ -64,6 +64,23 @@ module.exports = function definePaneBlobsSteps(reg) {
   };
 
   /**
+   * Does the pane name the configured path?
+   *
+   * Not simply `includes(source)`: the source line is clamped to the pane width
+   * — the contract's "clamp to the cell" — so a long path is legitimately drawn
+   * truncated, and demanding the whole string asserts something the renderer
+   * never promised. It passed only because /tmp is short; a macOS tmpdir
+   * (/var/folders/<2>/<24>/T/…) runs past the 72 columns these scenarios render
+   * at, which is why this was green on Linux and red on macOS.
+   *
+   * So: the full path, or a rendered line that is a non-trivial prefix of it.
+   * Still fails when the path is absent, which is what the scenarios are for.
+   */
+  const namesSource = (/** @type {string} */ frame, /** @type {string} */ source) =>
+    frame.includes(source)
+    || frame.split('\n').some((l) => l.trim().length >= 16 && source.startsWith(l.trim()));
+
+  /**
    * Render the configured pane through the whole real wiring.
    * A scenario that needs a pane-HEIGHT budget (row overflow) sets `w.maxRows`;
    * composeFrame sizes itself to the real pane and has no such knob, so those
@@ -301,7 +318,7 @@ module.exports = function definePaneBlobsSteps(reg) {
   });
   reg.define(/^the pane shows an invalid state naming the configured path$/, (w) => {
     assert.match(w.plain, /invalid/);
-    assert.ok(w.plain.includes(w.source), 'the configured path is named');
+    assert.ok(namesSource(w.plain, w.source), 'the configured path is named');
   });
   reg.define(/^no byte of the file's content appears in the pane$/, (w) => {
     // Derive the needles from the bytes THIS scenario actually wrote. Hardcoding
@@ -449,7 +466,7 @@ module.exports = function definePaneBlobsSteps(reg) {
   reg.define(/^no file exists at the configured path$/, (w) => { fs.rmSync(w.blobPath, { force: true }); });
   reg.define(/^the pane shows a waiting state naming the configured path$/, (w) => {
     assert.match(w.plain, /waiting/);
-    assert.ok(w.plain.includes(w.source));
+    assert.ok(namesSource(w.plain, w.source), 'the configured path is named');
   });
   reg.define(/^the pane is not skipped from the view cycle$/, (w) => {
     assert.match(w.plain, /2\/2/, 'a configured pane keeps its position even with no blob');
@@ -460,7 +477,7 @@ module.exports = function definePaneBlobsSteps(reg) {
   });
   reg.define(/^the pane shows an unreadable state naming the path$/, (w) => {
     assert.match(w.plain, /unreadable/);
-    assert.ok(w.plain.includes(w.source));
+    assert.ok(namesSource(w.plain, w.source), 'the configured path is named');
   });
 
   reg.define(/^the configured path exists but cannot be read as a regular file$/, (w) => {
@@ -469,7 +486,7 @@ module.exports = function definePaneBlobsSteps(reg) {
   });
   reg.define(/^the pane shows a cannot-read state naming the path and the reason class$/, (w) => {
     assert.match(w.plain, /cannot read/);
-    assert.ok(w.plain.includes(w.source));
+    assert.ok(namesSource(w.plain, w.source), 'the configured path is named');
     assert.match(w.plain, /\((directory|permission|symlink|not a regular file|unavailable)\)/,
       `a reason class is named: ${w.plain}`);
   });
@@ -481,7 +498,14 @@ module.exports = function definePaneBlobsSteps(reg) {
 
   reg.define(/^the configured path is a pipe that never yields bytes$/, (w) => {
     fs.rmSync(w.blobPath, { force: true });
-    try { execFileSync('mkfifo', [w.blobPath]); } catch { w.skipFifo = true; }
+    // "mkfifo did not throw" is NOT evidence of a pipe: Windows runners ship
+    // MSYS mkfifo with Git, which exits 0 without creating a FIFO on NTFS. The
+    // scenario then ran against a path with nothing at it and asserted
+    // cannot-read against a waiting state. Confirm the pipe actually exists.
+    try {
+      execFileSync('mkfifo', [w.blobPath]);
+      if (!fs.lstatSync(w.blobPath).isFIFO()) w.skipFifo = true;
+    } catch { w.skipFifo = true; }
   });
   reg.define(/^the pane shows the cannot-read state$/, (w) => {
     if (w.skipFifo) return;

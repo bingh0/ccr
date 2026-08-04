@@ -54,7 +54,11 @@ function moduleGraph(entry) {
 }
 
 const GRAPH = moduleGraph(ENTRY);
-const rel = (/** @type {string} */ f) => path.relative(ROOT, f);
+// POSIX separators regardless of host: these values are compared against
+// literals like 'src/render/economy.js', and path.relative yields backslashes
+// on Windows — which made the graph-walk assertions fail there while passing
+// everywhere else.
+const rel = (/** @type {string} */ f) => path.relative(ROOT, f).split(path.sep).join('/');
 
 test('sidecar graph reaches only fs, path, and os', () => {
   /** @type {string[]} */
