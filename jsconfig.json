@@ -1,5 +1,5 @@
 {
-  "//": "Type-check plain JS via @ts-check + JSDoc. No build/emit; editors and `npm run typecheck` use this. `strict` is intentionally off for now (keeps hand-written JSDoc low-friction); flip it on once the codebase is annotated.",
+  "//": "Type-check plain JS via @ts-check + JSDoc. No build/emit; editors and `npm run typecheck` use this. `strict` is ON: an implicit `any` is a point where checking silently stops, and without strictNullChecks TypeScript will not narrow a union by a boolean discriminant — which is how a real defect (a bucket key colliding with Object.prototype, see src/rate-limits.js) stayed invisible.",
   "compilerOptions": {
     "allowJs": true,
     "checkJs": true,
@@ -11,7 +11,7 @@
     "types": ["node"],
     "resolveJsonModule": true,
     "skipLibCheck": true,
-    "strict": false,
+    "strict": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
     "forceConsistentCasingInFileNames": true
