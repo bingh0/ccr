@@ -150,7 +150,12 @@ module.exports = function defineBurnSteps(reg) {
       const sm = smoothedRate(w.series.slice(0, k), 'claude-opus-4-8').rate;
       const a = w.series[k - 1], b = w.series[k - 2];
       const raw = (a.u - b.u) / (a.t - b.t);
-      if (smPrev != null) { smJit += Math.abs(sm - smPrev); rawJit += Math.abs(raw - rawPrev); n++; }
+      // smoothedRate returns a null rate when it has none yet, and rawPrev is
+      // only ever set alongside smPrev — a correlation the checker cannot see.
+      // Name both, so a null can never slip into the arithmetic as a zero.
+      if (smPrev != null && sm != null && rawPrev != null) {
+        smJit += Math.abs(sm - smPrev); rawJit += Math.abs(raw - rawPrev); n++;
+      }
       smPrev = sm; rawPrev = raw;
     }
     w.smJit = smJit / n; w.rawJit = rawJit / n;

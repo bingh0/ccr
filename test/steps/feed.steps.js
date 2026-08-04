@@ -11,7 +11,11 @@ function feed(/** @type {Record<string, any>} */ w) {
   w.feed = w.feed || { events: [], tools: {}, commands: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 }, files: [] };
   return w.feed;
 }
-function doRender(/** @type {Record<string, any>} */ w, opts) {
+/**
+ * @param {Record<string, any>} w
+ * @param {{ max?: number, width?: number }} [opts] omitted → renderFeed's own defaults
+ */
+function doRender(w, opts) {
   w.raw = renderFeed(feed(w), opts);
   w.out = strip(w.raw);
   w.lines = w.out ? w.out.split('\n') : [];

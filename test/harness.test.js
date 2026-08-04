@@ -71,6 +71,7 @@ test('executeSteps runs background + scenario against a shared world', async () 
 
   const p = parseFeature(SAMPLE);
   const sc = p.scenarios.find((s) => s.name === 'increment once');
+  assert.ok(sc, 'the sample feature defines "increment once"');
   const world = await executeSteps([...p.background, ...sc.steps], reg);
   assert.strictEqual(world.count, 5);
 });
@@ -89,7 +90,7 @@ test('executeSteps throws on an undefined step', async () => {
 // caller point straight at the offending line.
 
 /** Wrap a snippet with a Feature: line so only the construct under test varies. */
-const feat = (body) => `Feature: T\n${body}\n`;
+const feat = (/** @type {string} */ body) => `Feature: T\n${body}\n`;
 
 /** @type {Array<[string, string, RegExp]>} */
 const REJECTED = [

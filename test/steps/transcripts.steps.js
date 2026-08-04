@@ -13,11 +13,11 @@ let TS = 0;
 const nextTs = () => new Date(Date.UTC(2026, 0, 1, 0, 0, ++TS)).toISOString();
 
 /** push a raw JSONL line (object → stringified) onto the world's transcript */
-function push(/** @type {Record<string, any>} */ w, obj) {
+function push(/** @type {Record<string, any>} */ w, /** @type {any} */ obj) {
   w.tlines = w.tlines || [];
   w.tlines.push(typeof obj === 'string' ? obj : JSON.stringify(obj));
 }
-function assistantToolUse(/** @type {Record<string, any>} */ w, name, input) {
+function assistantToolUse(/** @type {Record<string, any>} */ w, /** @type {string} */ name, /** @type {any} */ input) {
   push(w, { type: 'assistant', timestamp: nextTs(), cwd: w.tcwd, gitBranch: w.tbranch, message: { model: 'claude-opus-4-8', content: [{ type: 'tool_use', name, input }] } });
 }
 

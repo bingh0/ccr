@@ -16,7 +16,7 @@ const DEFAULTS = {
   ccrJs: 'C:\\repo\\bin\\ccr.js',
 };
 
-function build(w) {
+function build(/** @type {Record<string, any>} */ w) {
   w.settingsFile = w.settingsFile || DEFAULTS.settingsFile;
   w.args = launchWin.buildWtArgs({
     ccCmd: w.ccCmd || DEFAULTS.ccCmd,

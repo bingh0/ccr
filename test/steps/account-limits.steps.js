@@ -11,7 +11,7 @@ const T5 = 1_783_101_000; // shared 5h reset instant
 const TW = 1_783_616_400; // shared weekly reset instant
 
 /** A same-account rate_limits object. */
-const acct = (five, week) => ({
+const acct = (/** @type {number} */ five, /** @type {number} */ week) => ({
   five_hour: { used_percentage: five, resets_at: T5 },
   seven_day: { used_percentage: week, resets_at: TW },
 });

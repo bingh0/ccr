@@ -28,14 +28,15 @@ let SEQ = 0;
 const freshDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ccr-feat-'));
 const tmpFile = () => path.join(os.tmpdir(), `ccr-feat-${process.pid}-${++SEQ}.jsonl`);
 
-function toolLine(name, input) {
+function toolLine(/** @type {string} */ name, /** @type {any} */ input) {
   return JSON.stringify({
     type: 'assistant',
     timestamp: '2026-01-01T00:00:00Z',
     message: { model: 'claude-opus-4-8', content: [{ type: 'tool_use', name, input }] },
   });
 }
-const append = (f, lines) => fs.appendFileSync(f, lines.map((l) => l + '\n').join(''));
+const append = (/** @type {string} */ f, /** @type {string[]} */ lines) =>
+  fs.appendFileSync(f, lines.map((l) => l + '\n').join(''));
 
 /**
  * Split the wt.exe argv into its meaningful pieces. Shape (see buildWtArgs):

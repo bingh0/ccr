@@ -132,7 +132,12 @@ module.exports = function defineSidecarHostingSteps(reg) {
     assert.match(src, /onSignal\('SIGUSR1'/, 'cycling arrives as a signal');
   });
 
-  const cycleHarness = (/** @type {Record<string, any>} */ w, /** @type {string} */ beat, freshMs) => {
+  /**
+   * @param {Record<string, any>} w
+   * @param {string|null} beat null writes no heartbeat file at all
+   * @param {number} [freshMs] omitted leaves the heartbeat's own mtime alone
+   */
+  const cycleHarness = (w, beat, freshMs) => {
     const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'ccr-cycle-'));
     w.defer(() => fs.rmSync(dir, { recursive: true, force: true }));
     if (beat != null) fs.writeFileSync(path.join(dir, 'sidecar-alive'), beat);

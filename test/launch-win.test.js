@@ -216,7 +216,7 @@ test('findWindowsTerminal: returns null when wt is absent (@AC7)', () => {
 });
 
 test('findWindowsTerminal: returns the resolved path when found', () => {
-  const runWhere = (name) => (name === 'wt' ? 'C:\\wt.exe' : null);
+  const runWhere = (/** @type {string} */ name) => (name === 'wt' ? 'C:\\wt.exe' : null);
   assert.strictEqual(findWindowsTerminal({ runWhere }), 'C:\\wt.exe');
 });
 

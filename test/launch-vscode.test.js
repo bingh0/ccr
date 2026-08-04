@@ -61,6 +61,7 @@ test('buildBanner: color mode adds ANSI (bright header + blink cue)', () => {
 
 test('copyToClipboard: emits OSC 52 and tries a native tool, best-effort', () => {
   let out = '';
+  /** @type {{ cmd: string, args: string[], input: string }[]} */
   const copies = [];
   copyToClipboard('PAYLOAD', {
     platform: 'linux',
@@ -131,8 +132,24 @@ test('buildClaudeSpawn: rejects " and % (cmd quote-break / expansion) with an er
 
 // --- run() / hint() with injected side effects -----------------------------
 
+/**
+ * @param {{ present?: string[], existsProfile?: boolean, deps?: Record<string, any> }} [over]
+ */
 function harness(over = {}) {
-  const w = { out: '', err: '', spawnedClaude: null, copied: [], droppedExited: 0, cleaned: [], settings: null };
+  const w = {
+    out: '',
+    err: '',
+    /** @type {{ bin: string, args: string[] }|null} */
+    spawnedClaude: null,
+    /** @type {{ cmd: string, input: string }[]} */
+    copied: [],
+    droppedExited: 0,
+    /** @type {string[]} */
+    cleaned: [],
+    /** @type {object|null} */
+    settings: null,
+  };
+  /** @type {Partial<import('../src/launch-vscode.js').Deps>} */
   const base = {
     env: {},
     home: '/home/me',
@@ -163,6 +180,7 @@ test('run: wires the banner, clipboard, Claude, and the exit sentinel', () => {
   assert.match(w.out, /live sidecar/, 'banner printed');
   assert.match(w.out, /Ctrl\+Shift\+5/);
   assert.ok(w.copied.length >= 1 || /\x1b\]52;c;/.test(w.out), 'clipboard attempted');
+  assert.ok(w.spawnedClaude, 'Claude was spawned');
   assert.strictEqual(w.spawnedClaude.bin, 'claude');
   assert.deepStrictEqual(w.spawnedClaude.args, ['--settings', 'C:\\Temp\\ccr-settings-x.json']);
   assert.strictEqual(w.droppedExited, 1, 'session-ended sentinel dropped after Claude exits');
@@ -171,7 +189,12 @@ test('run: wires the banner, clipboard, Claude, and the exit sentinel', () => {
 
 test('run: a failed Claude spawn cleans up but does NOT mark the session ended', () => {
   const { w, deps } = harness({
-    deps: { spawnClaude: (bin, args) => { w.spawnedClaude = { bin, args }; return { status: null, error: new Error('spawn claude ENOENT') }; } },
+    deps: {
+      spawnClaude: (/** @type {string} */ bin, /** @type {string[]} */ args) => {
+        w.spawnedClaude = { bin, args };
+        return { status: null, error: new Error('spawn claude ENOENT') };
+      },
+    },
   });
   const code = run(undefined, deps);
   assert.strictEqual(code, 1, 'a failed launch returns non-zero');
@@ -192,6 +215,7 @@ test('run: a profile runs `ccs <profile>` against the profile state dir', () => 
   const { w, deps } = harness({ present: ['ccs'] });
   const code = run('c1', deps);
   assert.strictEqual(code, 0);
+  assert.ok(w.spawnedClaude, 'ccs was spawned');
   assert.strictEqual(w.spawnedClaude.bin, 'ccs');
   assert.deepStrictEqual(w.spawnedClaude.args, ['c1', '--settings', 'C:\\Temp\\ccr-settings-x.json']);
   assert.match(w.out, /ccr sidecar --state-dir ".*\.ccr.c1"/, 'sidecar one-liner targets the profile state dir');

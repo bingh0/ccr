@@ -10,12 +10,12 @@ const path = require('node:path');
 const { run } = require('../src/doctor.js');
 
 // has() stub: resolve only the named tools to a fake path, everything else null.
-function hasStub(present) {
-  return (cmd) => (present[cmd] ? present[cmd] : null);
+function hasStub(/** @type {Record<string, string>} */ present) {
+  return (/** @type {string} */ cmd) => (present[cmd] ? present[cmd] : null);
 }
 
 // Run doctor on a simulated win32 box and capture the rendered text + exit code.
-function runWin(present, extra = {}) {
+function runWin(/** @type {Record<string, string>} */ present, /** @type {Record<string, any>} */ extra = {}) {
   let text = '';
   const code = run({
     platform: 'win32',

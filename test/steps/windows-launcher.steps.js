@@ -9,7 +9,7 @@ const assert = require('node:assert');
 const path = require('node:path');
 const { launchWin, launcherDeps, panes } = require('./_win-helpers');
 
-function runLauncher(world, profile) {
+function runLauncher(/** @type {Record<string, any>} */ world, /** @type {string|undefined} */ profile) {
   const deps = launcherDeps(world);
   world.code = launchWin.run(profile, deps);
   world.args = world.spawns.length ? world.spawns[0].args : null;

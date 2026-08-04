@@ -16,8 +16,28 @@ const { composeFrame, updateFeed, run, heartbeatTick, clearHeartbeat, sidecarAli
 // A fully-injected harness for run() so the end-of-session sweep and the
 // heartbeat takeover are testable without real timers, process.exit, stdout
 // writes, or heartbeat files in the real state dir.
+/**
+ * @param {{ sentinel?: boolean, beat?: () => ('claimed'|'yielded'),
+ *   exitOnEnd?: boolean, deps?: Record<string, any> }} [over]
+ */
 function runHarness(over = {}) {
-  const w = { ticks: 0, beats: 0, yields: 0, clearedBeat: 0, scheduled: [], cleared: { interval: 0, timeout: 0 }, exited: 0, signals: [], handlers: /** @type {Record<string, Function>} */ ({}) };
+  const w = {
+    ticks: 0,
+    beats: 0,
+    yields: 0,
+    clearedBeat: 0,
+    /** @type {{ cb: () => void, ms: number }[]} */
+    scheduled: [],
+    cleared: { interval: 0, timeout: 0 },
+    exited: 0,
+    /** @type {string[]} */
+    signals: [],
+    handlers: /** @type {Record<string, Function>} */ ({}),
+  };
+  // Bound to run()'s own parameter type rather than restating it, so the stub
+  // cannot drift from the real injection surface and the callbacks below get
+  // their parameter types for free.
+  /** @type {NonNullable<Parameters<typeof run>[0]>} */
   const deps = {
     graceMs: 1500,
     tick: () => { w.ticks++; },
@@ -26,7 +46,7 @@ function runHarness(over = {}) {
     clearBeat: () => { w.clearedBeat++; },
     onYield: () => { w.yields++; },
     setIntervalFn: () => 'INTERVAL_ID',
-    setTimeoutFn: (cb, ms) => { w.scheduled.push({ cb, ms }); return 'TIMEOUT_ID'; },
+    setTimeoutFn: (/** @type {() => void} */ cb, /** @type {number} */ ms) => { w.scheduled.push({ cb, ms }); return 'TIMEOUT_ID'; },
     clearIntervalFn: () => { w.cleared.interval++; },
     clearTimeoutFn: () => { w.cleared.timeout++; },
     exit: () => { w.exited++; },
@@ -272,6 +292,10 @@ test('sidecar shows no staleness marker while the snapshot is fresh', () => {
 let SEQ = 0;
 const tmpFile = () => path.join(os.tmpdir(), `ccr-feed-${process.pid}-${++SEQ}.jsonl`);
 
+/**
+ * @param {string} name
+ * @param {any} input
+ */
 function toolLine(name, input) {
   return JSON.stringify({
     type: 'assistant',
@@ -279,7 +303,8 @@ function toolLine(name, input) {
     message: { model: 'claude-opus-4-8', content: [{ type: 'tool_use', name, input }] },
   });
 }
-const append = (f, lines) => fs.appendFileSync(f, lines.map((l) => l + '\n').join(''));
+const append = (/** @type {string} */ f, /** @type {string[]} */ lines) =>
+  fs.appendFileSync(f, lines.map((l) => l + '\n').join(''));
 
 test('updateFeed accumulates tool events incrementally and only reads new bytes', () => {
   const f = tmpFile();

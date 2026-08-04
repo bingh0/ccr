@@ -11,7 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { launchWin, launcherDeps, panes, inject } = require('./_win-helpers');
 
-function runWithRealSettings(world) {
+function runWithRealSettings(/** @type {Record<string, any>} */ world) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccr-sl-'));
   world._tmpDir = tmpDir;
   (world.present ||= {}).claude = true;
@@ -22,7 +22,7 @@ function runWithRealSettings(world) {
   world.code = launchWin.run(undefined, deps);
   world.args = world.spawns.length ? world.spawns[0].args : null;
 }
-const cleanup = (w) => { if (w._tmpDir) fs.rmSync(w._tmpDir, { recursive: true, force: true }); };
+const cleanup = (/** @type {Record<string, any>} */ w) => { if (w._tmpDir) fs.rmSync(w._tmpDir, { recursive: true, force: true }); };
 
 /** @param {import('../gherkin').StepRegistry} reg */
 module.exports = function defineStatuslineInjectionSteps(reg) {

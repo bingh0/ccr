@@ -30,7 +30,7 @@ test('discovers and labels known, model-scoped, and monthly buckets', () => {
   assert.strictEqual(byKey.monthly.label, 'monthly');
   assert.strictEqual(byKey.monthly.windowMinutes, 43200);
 
-  assert.ok(ws.every((w) => w.minutesToReset > 0), 'all reset times finite + positive');
+  assert.ok(ws.every((w) => w.minutesToReset != null && w.minutesToReset > 0), 'all reset times finite + positive');
 });
 
 test('returns [] for an API session (no buckets)', () => {

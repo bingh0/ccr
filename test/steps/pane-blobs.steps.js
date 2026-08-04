@@ -69,7 +69,7 @@ module.exports = function definePaneBlobsSteps(reg) {
    * composeFrame sizes itself to the real pane and has no such knob, so those
    * render one level down, through the same verifier and the same renderer.
    */
-  const render = (/** @type {Record<string, any>} */ w, opts = {}) => {
+  const render = (/** @type {Record<string, any>} */ w, /** @type {{ cols?: number }} */ opts = {}) => {
     const cols = opts.cols || 72;
     if (w.maxRows) {
       const res = loadPaneBlob(w.blobPath, { now: w.now || Date.now() });

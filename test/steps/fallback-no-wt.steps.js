@@ -7,7 +7,7 @@
 const assert = require('node:assert');
 const { launchWin, launcherDeps } = require('./_win-helpers');
 
-function runLauncher(w) {
+function runLauncher(/** @type {Record<string, any>} */ w) {
   const deps = launcherDeps(w);
   w.threw = false;
   try { w.code = launchWin.run(undefined, deps); } catch (e) { w.threw = true; w.error = e; }

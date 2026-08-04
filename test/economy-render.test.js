@@ -12,7 +12,7 @@ const { fmtMins } = require('../src/render/shared');
 
 const strip = (/** @type {string} */ s) => s.replace(/\[[0-9;]*m/g, '');
 
-function meterFor(usedPct) {
+function meterFor(/** @type {number} */ usedPct) {
   const view = {
     model: 'Opus 4.8',
     windowSize: 1_000_000,

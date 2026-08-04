@@ -8,9 +8,10 @@ const os = require('node:os');
 const path = require('node:path');
 const { run } = require('../../src/doctor');
 
-const hasStub = (present) => (cmd) => (present[cmd] ? present[cmd] : null);
+const hasStub = (/** @type {Record<string, string>} */ present) =>
+  (/** @type {string} */ cmd) => (present[cmd] ? present[cmd] : null);
 
-function runDoctor(w) {
+function runDoctor(/** @type {Record<string, any>} */ w) {
   w.text = '';
   w.code = run({
     platform: 'win32',

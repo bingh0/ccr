@@ -17,7 +17,15 @@ function parseDur(s) {
 }
 
 /** add or replace a rate-limit bucket on the view (keyed, so overrides replace) */
-function setWindow(/** @type {Record<string, any>} */ w, key, label, usedPct, dur, windowMinutes) {
+/**
+ * @param {Record<string, any>} w
+ * @param {string} key
+ * @param {string} label
+ * @param {string} usedPct a step capture, hence the Number() below
+ * @param {string} dur a step capture like "3h20m", parsed to minutes
+ * @param {number} windowMinutes passed as a literal by the callers
+ */
+function setWindow(w, key, label, usedPct, dur, windowMinutes) {
   w.view = w.view || {};
   w.view.windows = w.view.windows || [];
   const win = { key, label, usedPct: Number(usedPct), minutesToReset: dur != null ? parseDur(dur) : null, windowMinutes };
@@ -31,7 +39,7 @@ function render(/** @type {Record<string, any>} */ w) {
   w.out = strip(w.raw);
   w.lines = w.out.split('\n');
   w.hero = w.lines[2] || '';                          // [0]=title [1]=blank [2]=hero
-  w.meterLines = w.lines.filter((l) => /[▓░]/.test(l)); // lines that contain a bar
+  w.meterLines = w.lines.filter((/** @type {string} */ l) => /[▓░]/.test(l)); // lines that contain a bar
 }
 /** find the bar row for a label (5h / weekly / ctx) */
 function meterRow(/** @type {Record<string, any>} */ w, /** @type {string} */ label) {

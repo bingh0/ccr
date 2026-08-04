@@ -11,11 +11,33 @@ const path = require('node:path');
 
 const { run, fallbackNoWt } = require('../src/launch-win.js');
 
-/** Build a fully-stubbed Deps object plus call recorders. */
+/**
+ * Build a fully-stubbed Deps object plus call recorders.
+ *
+ * The stub is typed against the real Deps contract on purpose: if a dependency
+ * changes shape, this stops compiling instead of drifting silently into a test
+ * that stubs something the launcher no longer asks for. Partial, because that
+ * is exactly what run() accepts — it fills the rest via withDefaults.
+ *
+ * @param {Partial<import('../src/launch-win.js').Deps>} [o]
+ */
 function makeDeps(o = {}) {
+  /** @type {string[]} */
   const errs = [];
+  /** @type {string[]} */
   const outs = [];
-  const calls = { spawnWt: [], ensureDir: [], removeExited: [], cleanup: [], writeSettings: 0 };
+  const calls = {
+    /** @type {{ wt: string, args: string[] }[]} */
+    spawnWt: [],
+    /** @type {string[]} */
+    ensureDir: [],
+    /** @type {string[]} */
+    removeExited: [],
+    /** @type {string[]} */
+    cleanup: [],
+    writeSettings: 0,
+  };
+  /** @type {Partial<import('../src/launch-win.js').Deps>} */
   const deps = {
     env: o.env || {},
     home: o.home || '/home/me',
@@ -130,6 +152,7 @@ test('run: a spawn error cleans up the temp settings file and exits 1', () => {
 });
 
 test('fallbackNoWt: returns 1 with native-CLI guidance and no crash (@AC7)', () => {
+  /** @type {string[]} */
   const errs = [];
   const code = fallbackNoWt({ err: (s) => errs.push(s) });
   assert.strictEqual(code, 1);

@@ -11,7 +11,7 @@ const T5 = 1_783_101_000; // 5h reset instant (epoch s)
 const TW = 1_783_616_400; // weekly reset instant
 
 /** A same-account snapshot's rate_limits at a given usage. */
-const acct = (five, week, extra = {}) => ({
+const acct = (/** @type {number} */ five, /** @type {number} */ week, /** @type {Record<string, any>} */ extra = {}) => ({
   five_hour: { used_percentage: five, resets_at: T5 },
   seven_day: { used_percentage: week, resets_at: TW },
   ...extra,

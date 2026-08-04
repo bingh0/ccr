@@ -14,7 +14,7 @@ function parseDur(s) {
   return m;
 }
 /** "150K" / "1.0M" → tokens */
-function parseTok(s) {
+function parseTok(/** @type {string} */ s) {
   const m = /([\d.]+)\s*([KM]?)/.exec(s);
   if (!m) return Number(s);
   const n = Number(m[1]);
@@ -24,7 +24,15 @@ function view(/** @type {Record<string, any>} */ w) {
   w.view = w.view || { windows: [] };
   return w.view;
 }
-function setWindow(/** @type {Record<string, any>} */ w, key, label, usedPct, dur, rate) {
+/**
+ * @param {Record<string, any>} w
+ * @param {string} key
+ * @param {string} label
+ * @param {string} usedPct a step capture, hence the Number() below
+ * @param {string} dur a step capture like "4h00m", parsed to minutes
+ * @param {number} rate the callers coerce this one themselves
+ */
+function setWindow(w, key, label, usedPct, dur, rate) {
   view(w).windows.push({ key, label, usedPct: Number(usedPct), minutesToReset: parseDur(dur), windowMinutes: parseDur(dur) + 1, rate });
 }
 

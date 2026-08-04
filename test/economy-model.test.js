@@ -47,14 +47,17 @@ test('context pct is tokens/windowSize, raw (unrounded)', () => {
 test('identifies the binding window and bands it', () => {
   const m = computeEconomy(pressuredView());
   // 5h: (100-80)/0.5 = 40 min left < 200 to reset → it binds, and 40 ≤ WARN(120)
+  assert.ok(m.binding, 'a window binds under pressure');
   assert.strictEqual(m.binding.key, 'five_hour');
   assert.strictEqual(m.binding.band, 'warn');
   const five = m.windows.find((w) => w.key === 'five_hour');
+  assert.ok(five, 'the 5h window is present');
   assert.strictEqual(five.binding, true);
   assert.strictEqual(five.minutesLeft, 40);
   assert.strictEqual(five.resetsBeforeHit, false);
   // weekly resets long before it would exhaust → not binding
   const week = m.windows.find((w) => w.key === 'seven_day');
+  assert.ok(week, 'the weekly window is present');
   assert.strictEqual(week.binding, false);
   assert.strictEqual(week.resetsBeforeHit, true);
 });
