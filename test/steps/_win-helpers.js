@@ -85,6 +85,17 @@ function launcherDeps(world, opts = {}) {
     existsDir: () => !!world.existsProfile,
     listDir: () => world.availableProfiles || ['c1', 'c2'],
     ensureDir: (/** @type {string} */ dir) => { world.ensured.push(dir); },
+    // Slot allocation is REAL filesystem work against `home`. Left unstubbed it
+    // probes and creates instance dirs under the fake home — which happens to
+    // fail on a dev box (/home/me is unwritable) and SUCCEEDS in a container
+    // running as root, so the suite would pass or fail depending on the machine.
+    // These scenarios pin launcher wiring, not allocation: default to slot 1 —
+    // EVERY launch slots now, profiled or bare (features/instance-lifecycle
+    // .feature). features/instance-slots.feature owns allocation itself.
+    prepareInstance: world.prepareInstance || (() => ({ name: 'stub', title: 'stub' })),
+    allocateSlot: world.allocateSlot || (() => ({
+      slot: 1, session: 'ccr', stateDir: path.join(world.home || path.join('/home', 'me'), '.ccr', 'instances', '1'), attached: false,
+    })),
     removeExited: (/** @type {string} */ dir) => { world.removedExited.push(dir); },
     writeSettings: opts.writeSettings || ((s) => { world.written.push(s); return 'C:\\Temp\\ccr-settings-feat.json'; }),
     cleanup: (/** @type {string} */ f) => { world.cleaned.push(f); },

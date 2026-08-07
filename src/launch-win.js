@@ -82,11 +82,15 @@ function resolveProfileState(profile, opts = {}) {
   const env = opts.env || process.env;
   const home = opts.home || os.homedir();
 
+  // The stateDir fallbacks are reachable only when called with neither a slot's
+  // env nor the user's own override — never from the launchers, which refuse an
+  // exhausted allocation before this. They point at slot 1's member dir so no
+  // path here can ever name the container itself as a state dir.
   if (profile) {
     return {
       ccCmd: `ccs ${profile}`,
-      session: env.CCR_SESSION || `ccr-${profile}`,
-      stateDir: env.CCR_STATE_DIR || path.join(home, '.ccr', profile),
+      session: env.CCR_SESSION || 'ccr',
+      stateDir: env.CCR_STATE_DIR || path.join(home, '.ccr', 'instances', '1'),
       instanceDir: path.join(home, '.ccs', 'instances', profile),
       usesCcs: true,
     };
@@ -94,7 +98,7 @@ function resolveProfileState(profile, opts = {}) {
   return {
     ccCmd: env.CC_BIN || 'claude',
     session: env.CCR_SESSION || 'ccr',
-    stateDir: env.CCR_STATE_DIR || path.join(home, '.ccr'),
+    stateDir: env.CCR_STATE_DIR || path.join(home, '.ccr', 'instances', '1'),
     instanceDir: null,
     usesCcs: false,
   };
@@ -179,7 +183,7 @@ function sidecarCols(termCols, fracNum, splitFlag) {
  *
  * @param {{ ccCmd: string, settingsFile: string, stateDir: string,
  *   node: string, ccrJs: string, sidebarPct?: number, sidebarSide?: string,
- *   termCols?: number }} o
+ *   termCols?: number, title?: string }} o
  * @returns {string[]}
  */
 function buildWtArgs(o) {
@@ -200,6 +204,9 @@ function buildWtArgs(o) {
   }
   const frac = sidebarFraction(o.sidebarPct);
   const splitFlag = sidebarSplitFlag(o.sidebarSide);
+  // The tab's ADDRESS ("[profile / ]name") when the instance has one — both
+  // halves allow-listed, so it is wt-arg-safe by construction.
+  const title = o.title || 'Claude';
   const exited = path.win32.join(stateDir, 'exited');
 
   // After Claude exits we drop the sentinel + clean the settings file, then idle
@@ -224,7 +231,7 @@ function buildWtArgs(o) {
   const pane1 = paneCommand(stateDir, sidecarBody);
 
   return [
-    '-w', '0', 'new-tab', '--title', 'Claude', 'cmd', '/c', pane0,
+    '-w', '0', 'new-tab', '--title', title, 'cmd', '/c', pane0,
     ';',
     'split-pane', splitFlag, '-s', frac, 'cmd', '/c', pane1,
   ];
@@ -255,7 +262,8 @@ function defaultWhere(name) {
 }
 
 const inject = require('./settings-inject');
-const { ensureSecureDir } = require('./state-dir');
+const slots = require('./instance-slot');
+const { ensureSecureDir, recordLaunchDir } = require('./state-dir');
 
 /**
  * Fill in real-environment implementations for anything the caller didn't
@@ -283,6 +291,11 @@ function withDefaults(deps) {
     existsDir: deps.existsDir || defaultExistsDir,
     listDir: deps.listDir || defaultListDir,
     ensureDir: deps.ensureDir || ensureSecureDir,
+    recordLaunchDir: deps.recordLaunchDir || recordLaunchDir,
+    allocateSlot: deps.allocateSlot || ((o) => slots.allocateSlot(o)),
+    prepareInstance: deps.prepareInstance
+      || ((/** @type {{slot:number,stateDir:string}} */ s, /** @type {any} */ o) =>
+        require('./instance-name').prepareInstance(s, { ...o, home: deps.home || os.homedir() })),
     removeExited: deps.removeExited || defaultRemoveExited,
     writeSettings: deps.writeSettings || ((s) => inject.writeSettingsFile(s)),
     cleanup: deps.cleanup || ((f) => inject.cleanupSettingsFile(f)),
@@ -347,9 +360,10 @@ function fallbackNoWt(d) {
  *
  * @param {string} [profile]
  * @param {Partial<Deps>} [deps]
+ * @param {{ name?: string|null }} [opts]  explicit --name, already validated
  * @returns {number}
  */
-function run(profile, deps = {}) {
+function run(profile, deps = {}, opts = {}) {
   const d = withDefaults(deps);
 
   // 1. Validate the profile (it lands in paths and a spawned command).
@@ -362,8 +376,18 @@ function run(profile, deps = {}) {
   const wt = d.findWt();
   if (!wt) return fallbackNoWt(d);
 
-  // 3. Resolve profile state + required binaries.
-  const st = resolveProfileState(profile, { env: d.env, home: d.home });
+  // 3. Resolve profile state + required binaries. Every launch first claims a
+  // free instance slot (src/instance-slot.js) so a second window never shares
+  // another's state dir; only an explicit override skips it.
+  const slot = d.allocateSlot({ profile, env: d.env, home: d.home });
+  if (slot && 'exhausted' in slot) {
+    d.err(`ccr: every slot is in use (${slots.MAX_SLOTS} live instances) — close one first\n`);
+    return 1;
+  }
+  // The instance's name, profile record and title — same on every platform.
+  const inst = slot && !('exhausted' in slot)
+    ? d.prepareInstance(slot, { profile, name: opts.name }) : null;
+  const st = resolveProfileState(profile, { env: slots.applySlotEnv(d.env, slot), home: d.home });
   if (st.usesCcs) {
     if (!d.which('ccs')) {
       d.err("ccr: 'ccs' not found on PATH — pass a profile only if CCS is installed.\n");
@@ -385,6 +409,9 @@ function run(profile, deps = {}) {
 
   // 4. Prepare the per-profile state dir; clear a stale sentinel.
   try { d.ensureDir(st.stateDir); } catch { /* best effort */ }
+  // The tab's stable identity for the git pane. Recorded here because only the
+  // launcher knows where ccr was started (src/state-dir.js).
+  try { d.recordLaunchDir(st.stateDir, process.cwd()); } catch { /* best effort */ }
   d.removeExited(st.stateDir);
 
   // 5. Inject statusLine via a temp settings FILE (avoids CLI JSON quoting).
@@ -404,6 +431,7 @@ function run(profile, deps = {}) {
       sidebarPct: Number.isFinite(pct) ? pct : DEFAULT_SIDEBAR_PCT,
       sidebarSide: d.env.CCR_SIDEBAR_SIDE || DEFAULT_SIDEBAR_SIDE,
       termCols: d.cols,
+      title: inst ? inst.title : undefined,
     });
   } catch (e) {
     d.err(`ccr: ${e instanceof Error ? e.message : String(e)}\n`);
@@ -434,6 +462,9 @@ function run(profile, deps = {}) {
  * @property {(dir: string) => boolean} existsDir
  * @property {(dir: string) => string[]} listDir
  * @property {(dir: string) => void} ensureDir
+ * @property {(dir: string, cwd: string) => void} recordLaunchDir
+ * @property {(o: {profile?: string, env: NodeJS.ProcessEnv, home: string}) => ({slot: number, session: string, stateDir: string, attached: boolean}|{exhausted: true}|null)} allocateSlot
+ * @property {(slot: {slot: number, stateDir: string}, o: {profile?: string, name?: string|null}) => {name: string, title: string}} prepareInstance
  * @property {(dir: string) => void} removeExited
  * @property {(settings: object) => string} writeSettings
  * @property {(file: string) => void} cleanup

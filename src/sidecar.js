@@ -20,6 +20,10 @@ const { stripControl } = require('./sanitize');
 const { loadPaneConfig } = require('./pane-config');
 const { loadPaneBlob } = require('./pane-blob');
 const { renderPane } = require('./render/pane');
+const { readGitRepo, discoverRepo } = require('./git-repo');
+const { computeWorkingTree } = require('./git-working-tree');
+const { readHistory } = require('./git-history');
+const { renderGitPane, laneBudget } = require('./render/git-pane');
 const { readViewRequests } = require('./cycle-view');
 
 const STATE_DIR = process.env.CCR_STATE_DIR || path.join(os.homedir(), '.ccr');
@@ -76,9 +80,13 @@ function heartbeatTick(stateDir, nonce, opts = {}) {
     if (other && mine && (other.start > mine.start || (other.start === mine.start && other.pid > mine.pid))) {
       return 'yielded';
     }
-    // Never write THROUGH a symlink planted at this path — that turns a
-    // heartbeat into an arbitrary-file write of "<pid>:<ms>".
-    try { if (fs.lstatSync(file).isSymbolicLink()) fs.rmSync(file, { force: true }); } catch { /* absent */ }
+    // Never write THROUGH anything but a plain file at this path. A symlink
+    // would turn a heartbeat into an arbitrary-file write of "<pid>:<ms>"; a
+    // FIFO is worse in a quieter way — opening one for write BLOCKS until a
+    // reader appears, which hangs the draw loop outright and takes the whole
+    // sidebar down with no error. Both are plantable by anything running as the
+    // user, so anything that is not a regular file is removed first.
+    try { if (!fs.lstatSync(file).isFile()) fs.rmSync(file, { force: true }); } catch { /* absent */ }
     fs.writeFileSync(file, nonce);
   } catch { /* best-effort */ }
   return 'claimed';
@@ -169,6 +177,50 @@ function draw(/** @type {string} */ s) {
 }
 
 /**
+ * The directory the SESSION is currently working in, as Claude Code last
+ * reported it. `workspace.current_dir` is the field that tracks a session that
+ * moved; `cwd` is the same value in older payloads and is the fallback rather
+ * than the primary for exactly that reason.
+ *
+ * Returns null when there is no snapshot yet, which the git pane renders as
+ * "not a git repository" — correct, because before the first status tick ccr
+ * genuinely does not know where the session is.
+ *
+ * @param {string} stateDir
+ * @returns {string|null}
+ */
+function sessionDir(stateDir) {
+  const raw = readTextCapped(path.join(stateDir, 'last-status.json'));
+  if (!raw) return null;
+  try {
+    const s = JSON.parse(raw);
+    if (!s || typeof s !== 'object') return null;
+    const w = s.workspace;
+    if (w && typeof w.current_dir === 'string' && w.current_dir) return w.current_dir;
+    return typeof s.cwd === 'string' && s.cwd ? s.cwd : null;
+  } catch { return null; }
+}
+
+/**
+ * The directory ccr was LAUNCHED in — the tab's stable identity. Written by the
+ * launcher (src/state-dir.js: recordLaunchDir); the sidecar's own cwd is the
+ * fallback, which is right under tmux and wt.exe where the pane inherits it.
+ *
+ * `process.cwd()` throws when the directory it names has been deleted, which is
+ * not hypothetical here: it is the "repository is deleted while the pane is
+ * live" scenario, and the pane must keep drawing through it.
+ *
+ * @param {string} stateDir
+ * @returns {string|null}
+ */
+function launchDir(stateDir) {
+  const raw = readTextCapped(path.join(stateDir, 'launch-cwd'), 4096);
+  const line = raw ? raw.split('\n')[0].trim() : '';
+  if (line) return line;
+  try { return process.cwd(); } catch { return null; }
+}
+
+/**
  * Compose the screen for one tick — the ended / waiting / unreadable / live
  * states — and return it as a string (no I/O to stdout). Pure enough to test:
  * the only inputs are the state dir on disk, `now`, and the pane width `cols`.
@@ -177,24 +229,32 @@ function draw(/** @type {string} */ s) {
  * is clamped to it so a wide row can't soft-wrap and corrupt the cursor-home
  * redraw in a narrow cmd/PowerShell/split pane. Omit it (non-TTY) for no clamp.
  *
- * `view` selects which whole-pane view to draw: 0 is ccr's own economy view and
- * 1..N are the configured external panes, in config order. It is taken modulo
- * the number of views, so an index that outlives a shrinking config wraps rather
- * than showing nothing. External panes are FULL-HEIGHT views, never stacked
- * beside the economy panel — one pane, one subject.
+ * `view` selects which whole-pane view to draw: 0 is ccr's own economy view, 1
+ * is the built-in git pane, and 2..N are the configured external panes in config
+ * order. It is taken modulo the number of views, so an index that outlives a
+ * shrinking config wraps rather than showing nothing. Every view is FULL-HEIGHT,
+ * never stacked beside the economy panel — one pane, one subject.
  *
  * @param {string} stateDir
  * @param {{ now?: number, cols?: number, rows?: number, view?: number,
- *   panes?: Array<{path: string, source: string}> }} [opts]
+ *   panes?: Array<{path: string, source: string}>, home?: string }} [opts]
  * @returns {string}
  */
 function composeFrame(stateDir, opts = {}) {
   const now = opts.now != null ? opts.now : Date.now();
   const cols = opts.cols;
+  // The sidebar names its instance (features/instance-identity.feature): the
+  // name rides every frame — every view, the waiting line, the ended line —
+  // so a glance at any sidebar says which instance it belongs to.
+  let namePrefix = '';
+  try {
+    const name = fs.readFileSync(path.join(stateDir, 'name'), 'utf8').trim();
+    if (name) namePrefix = bold(name) + '\n';
+  } catch { /* unnamed — no line */ }
   const clamp = (/** @type {string} */ s) =>
     (typeof cols === 'number' && cols > 0
-      ? s.split('\n').map((l) => clampVisible(l, cols)).join('\n')
-      : s);
+      ? (namePrefix + s).split('\n').map((l) => clampVisible(l, cols)).join('\n')
+      : namePrefix + s);
   const snapshot = path.join(stateDir, 'last-status.json');
   const exited = path.join(stateDir, 'exited');
 
@@ -204,10 +264,57 @@ function composeFrame(stateDir, opts = {}) {
   // relaunch, and it is best-effort: a broken config costs the panes, never the
   // panel (loadPaneConfig is total — see src/pane-config.js).
   const panes = opts.panes || loadPaneConfig().panes;
-  const viewCount = 1 + panes.length;
+  // View order: 0 economy, 1 the git pane, 2… external panes. The git pane is
+  // BUILT IN and therefore always in the cycle — including in a directory that
+  // is not a repository at all, where it says so. A view that appeared and
+  // vanished with the session's cwd would renumber the cycle underneath the
+  // user's F3 key, and "not a git repository" is itself the answer to the
+  // question this pane exists to answer.
+  const viewCount = 2 + panes.length;
   const view = ((Math.trunc(opts.view || 0) % viewCount) + viewCount) % viewCount;
-  if (view > 0) {
-    const pane = panes[view - 1];
+  // The "n/N" position marker appears only once the cycle is longer than the two
+  // BUILT-IN views. Ruled 2026-08-05: adding the git pane made viewCount always
+  // ≥ 2, which would have put a marker on the economy panel of every user who
+  // has configured nothing — a visible change to a shipped surface, bought for
+  // nothing, since two self-identifying views need no numbering to tell apart.
+  // A user who has configured a pane keeps the markers they already had.
+  const showPosition = viewCount > 2;
+  const positionAt = (/** @type {number} */ i) => (showPosition ? `${i + 1}/${viewCount}` : '');
+  if (view === 1) {
+    // Guarded exactly like the external-pane branch: a bad repository must cost
+    // its own pane and nothing else (features/git-pane-safety.feature).
+    try {
+      const identity = readGitRepo({
+        currentDir: sessionDir(stateDir),
+        launchDir: launchDir(stateDir),
+      });
+      // The body sections exist only where a working tree does: a located,
+      // readable, non-bare repo. readGitRepo does not expose gitDir,
+      // deliberately (it is an identity model); re-discovering from the root it
+      // named costs one stat and keeps the model boundary clean.
+      let workingTree;
+      let history;
+      const paneCols = typeof cols === 'number' && cols > 0 ? cols : 48;
+      if (identity.state === 'ok' && !identity.bare && identity.root) {
+        const at = discoverRepo(identity.root);
+        if (at.found && at.gitDir) {
+          workingTree = computeWorkingTree({ root: identity.root, gitDir: at.gitDir });
+          history = readHistory(at.gitDir, { maxLanes: laneBudget(paneCols), maxRows: 32 });
+        }
+      }
+      return clamp(renderGitPane({ identity, workingTree, history }, {
+        width: paneCols,
+        rows: opts.rows || resolveRows() || 24,
+        now,
+        position: positionAt(view),
+      }) + '\n');
+    } catch (e) {
+      const msg = stripControl(e && e instanceof Error ? e.message : String(e)) || 'unknown';
+      return clamp(dim('ccr · git pane error: ' + msg.slice(0, 120)) + '\n');
+    }
+  }
+  if (view > 1) {
+    const pane = panes[view - 2];
     // Guarded like the economy branch below: "a malformed file must cost a pane
     // state, never the sidecar" is the contract's rule, and leaving it to rest
     // on the renderer never throwing would make it one careless edit from false.
@@ -215,7 +322,7 @@ function composeFrame(stateDir, opts = {}) {
       const res = loadPaneBlob(pane.path, { now });
       return clamp(renderPane(res, {
         source: pane.source,
-        position: `${view + 1}/${viewCount}`,
+        position: positionAt(view),
         width: typeof cols === 'number' && cols > 0 ? cols : 48,
         // Rows the body may use: the pane's height less the chrome (title,
         // basis, blank) and a line of breathing room. Without this the overflow
@@ -240,11 +347,11 @@ function composeFrame(stateDir, opts = {}) {
     // panel lags a busy one. Reconcile the meters against sibling profiles on the
     // SAME account (see src/account-limits.js) before rendering — best-effort, and
     // strictly guarded so a different account is never mixed in.
-    const reconciled = { ...state, rate_limits: freshenAccountLimits(state.rate_limits, stateDir) };
+    const reconciled = { ...state, rate_limits: freshenAccountLimits(state.rate_limits, stateDir, opts.home ? { home: opts.home } : {}) };
     out = renderEconomy(normalizeStatus(reconciled), { tick: Math.floor(now / 1000) % 2 === 0 });
-    // ccr's own view is position 1 of the cycle. Shown only when there is a
-    // cycle to be in — a lone economy view has no position worth naming.
-    if (viewCount > 1) out = out.replace(/\n/, dim(`   1/${viewCount}`) + '\n');
+    // ccr's own view is position 1 of the cycle, named only when the cycle is
+    // long enough for the position to tell you something (see showPosition).
+    if (showPosition) out = out.replace(/\n/, dim(`   ${positionAt(0)}`) + '\n');
   } catch (e) {
     // Sanitize and bound the message: it is the one error surface that prints
     // text ccr did not author, and an exception string can quote the input that
@@ -360,7 +467,13 @@ function __resetViewState() { currentView = 0; seenRequests = null; }
  * clearing the file — it now belongs to the newer panel. `beat`/`clearBeat`/
  * `onYield` are injectable so the takeover is unit-testable too.
  *
- * @param {{ exitOnEnd?: boolean, stateDir?: string, graceMs?: number,
+ * `view` sets which view the panel OPENS on (0 economy, 1 the git pane, 2…N the
+ * configured panes). It is a starting point, not a pin: the cycle key still
+ * advances from there. It cannot be used to put two panels side by side on one
+ * state dir — the heartbeat allows exactly one live sidecar per state dir, and
+ * the second to start makes the first stand down.
+ *
+ * @param {{ exitOnEnd?: boolean, stateDir?: string, graceMs?: number, view?: number,
  *   tick?: () => void, sentinelExists?: () => boolean,
  *   beat?: () => ('claimed' | 'yielded'), clearBeat?: () => void, onYield?: () => void,
  *   setIntervalFn?: Function, setTimeoutFn?: Function,
@@ -386,6 +499,13 @@ function run(opts = {}) {
   const clearTimeoutFn = opts.clearTimeoutFn || clearTimeout;
   const exit = opts.exit || (() => process.exit(0));
   const onSignal = opts.onSignal || ((sig, handler) => process.on(sig, handler));
+
+  // The opening view. Set before the first tick so the panel never paints the
+  // economy panel for one frame on its way to the requested one.
+  if (opts.view != null) {
+    const v = Math.trunc(Number(opts.view));
+    if (Number.isFinite(v) && v >= 0) currentView = v;
+  }
 
   // Poll the sentinel fast when we have to detect the end; keep the redraw at ~1s.
   const RENDER_MS = 1000;
@@ -442,4 +562,9 @@ function run(opts = {}) {
 module.exports = {
   run, updateFeed, composeFrame, heartbeatTick, clearHeartbeat, sidecarAlive,
   frame, __resetViewState,
+  // Exported so slot allocation (src/instance-slot.js) and its tests can reason
+  // about this file without duplicating its name or its freshness window. The
+  // launcher never WRITES it: the heartbeat is the sidecar's, and a newer nonce
+  // here is what makes a live sidebar stand down.
+  HEARTBEAT_FILE, HEARTBEAT_FRESH_MS,
 };

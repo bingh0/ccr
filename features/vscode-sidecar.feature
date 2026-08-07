@@ -39,6 +39,16 @@ Feature: VS Code split-terminal sidecar
     Then the sidecar one-liner targets the resolved state dir by argument
     And it is copied to the clipboard via an OSC 52 escape
 
+  # This host binds no key of its own, and its split leaves both panes running a
+  # foreground process — so there is not even a free prompt to type
+  # `ccr cycle-view` into. The pasted command therefore brings its own key
+  # reader (src/sidecar-keys.js); under tmux the launcher binds F3 instead.
+  @AC10
+  Scenario: The one-liner brings its own cycle key, since this host binds none
+    When I run "ccr"
+    Then the sidecar one-liner asks for the key reader
+    And the banner names the keys that cycle the views
+
   @AC10
   Scenario: Exiting Claude flips the sidecar to the session-ended state
     When I run "ccr" and Claude exits
@@ -83,19 +93,19 @@ Feature: VS Code split-terminal sidecar
     And the CCS profile directory for "c1" exists
     When I run "ccr c1"
     Then Claude starts via `ccs c1 --settings <temp-file>`
-    And the sidecar one-liner targets the "~/.ccr/c1" state dir
+    And the sidecar one-liner targets the "~/.ccr/instances/1" state dir
 
   # The statusline subprocess (a grandchild via Claude) resolves its state dir
   # from CCR_STATE_DIR — the launcher must thread it into the spawn, or a
-  # profile session snapshots into the DEFAULT ~/.ccr: its own sidecar starves
-  # and a concurrently running bare session (e.g. personal + work accounts at
-  # once) gets its state dir clobbered by the other account.
+  # profile session snapshots into another instance's dir: its own sidecar
+  # starves and a concurrently running session (e.g. personal + work accounts
+  # at once) gets its state dir clobbered by the other account.
   @AC10
   Scenario: Claude inherits the profile's state dir so two accounts never mix
     Given `ccs` is resolvable on PATH
     And the CCS profile directory for "c1" exists
     When I run "ccr c1"
-    Then Claude's environment carries CCR_STATE_DIR = the "~/.ccr/c1" state dir
+    Then Claude's environment carries CCR_STATE_DIR = the "~/.ccr/instances/1" state dir
 
   @AC10
   Scenario: Unknown CCS profile errors clearly and starts nothing

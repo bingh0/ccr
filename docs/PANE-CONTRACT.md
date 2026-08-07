@@ -447,3 +447,56 @@ ruled; the subsystem is implemented and its feature files bind.
   neither knows nor needs to know who produces blobs. Any tool that writes a
   conforming blob and gets wired in by user config is a producer; ccr's
   obligations never vary per producer, so nothing registers here.
+
+**2026-08-05 (post-git-pane)** — one amendment.
+
+- **Amends "Host scope (v1): tmux only" above, for cycling and for cycling
+  only.** That ruling refused keys on VS Code and Windows Terminal, and its
+  stated reason was pane injection — "VS Code's integrated terminal offers no
+  pane-injection mechanism". Cycling injects nothing: even under tmux, F3 runs
+  `ccr cycle-view`, which increments a counter in a file. The reason therefore
+  never applied to it, and the git pane made the gap bite: every instance now
+  has two BUILT-IN views, where before a user with no configured panes had a
+  one-view cycle and a missing key cost nothing. VS Code's split leaves both
+  panes running a foreground process, so there is not even a free shell prompt
+  to type the command into.
+
+  `ccr sidecar --keys` therefore makes ccr the hotkey host where the host binds
+  nothing. **The structural invariant is unchanged, and that is the whole
+  design:** the key reader is a SEPARATE PROCESS (`src/sidecar-keys.js`) that
+  owns the terminal's stdin and spawns the panel as a child with `stdin:
+  'ignore'`. The renderer reads no key, exactly as before — tmux's own
+  separation with ccr standing in for the host. Both directions are pinned in
+  `test/sidecar-capabilities.test.js`: the renderer's module graph can never
+  reach the key reader, and the key reader's graph can never reach a renderer.
+  Collapsing them into one process would leave every other assertion in that
+  file passing, which is why the wall is asserted rather than described.
+
+  The key set stays a compile-time constant, per the trust rule above: F3 in
+  both encodings, and Space — because an editor that keeps F3 for its own
+  "find next" while the terminal is focused would otherwise leave the pane with
+  no key at all, and that behaviour differs across VS Code, Cursor, Positron and
+  Antigravity. **Injection remains tmux-only.** This grants cycling, not typing:
+  nothing here can send a keystroke to the agent's pane.
+
+  Residual risk, stated rather than implied: a hostile blob can emit a terminal
+  query whose response the terminal delivers to whoever owns stdin, which is now
+  this process rather than nobody. That buys exactly what forging the request
+  file buys — "a different pane on screen", priced in the 2026-08-02 amendment
+  above. The process that receives it renders nothing and writes one counter.
+
+- **`--view <n>` opens the panel on a chosen view**, and is a starting point
+  rather than a pin: the cycle key still advances from there. It does NOT enable
+  two panels side by side on one state dir — the heartbeat allows exactly one
+  live sidecar per state dir, and the second to start makes the first stand down.
+
+---
+
+**Amendment (2026-08-06, the 0.4.0 instance layout).** The config-location
+ruling above is unchanged; one example path in it aged. "ccr's own state dir
+(`~/.ccr`)" now reads `~/.ccr/instances/<n>`: `~/.ccr` itself became a
+container — account burn history and per-session logs at its top, every
+instance (bare or profiled) in an ephemeral numbered member dir that is
+deleted when its session ends. The config stays exactly where the ruling put
+it: outside every state dir, at `~/.config/ccr/`, which is not a path the
+layout change touches.

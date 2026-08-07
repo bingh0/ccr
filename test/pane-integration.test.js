@@ -58,9 +58,11 @@ test('composeFrame renders panes from the USER CONFIG, not just injected ones', 
   // No `panes` option: the sidecar must go and read the config itself. Every
   // feature scenario injects `panes`, so without this the wiring is untested
   // and `panes = opts.panes || []` passes the entire suite.
-  const view1 = plain(composeFrame(w.state, { now: Date.now(), cols: 72, view: 1 }));
-  assert.match(view1, /trace/, 'the configured pane is discovered and rendered');
-  assert.match(view1, /2\/2/, 'it takes its position in the cycle');
+  // View 2, not 1: the cycle is economy, the built-in git pane, then the
+  // configured panes in order (src/sidecar.js composeFrame).
+  const paneFrame = plain(composeFrame(w.state, { now: Date.now(), cols: 72, view: 2 }));
+  assert.match(paneFrame, /trace/, 'the configured pane is discovered and rendered');
+  assert.match(paneFrame, /3\/3/, 'it takes its position in the cycle');
 });
 
 test('a relative config path resolves against the config file, end to end', (t) => {
@@ -73,7 +75,35 @@ test('a relative config path resolves against the config file, end to end', (t) 
   process.env.CCR_CONFIG = w.configFile;
   t.after(() => { if (prev == null) delete process.env.CCR_CONFIG; else process.env.CCR_CONFIG = prev; });
 
-  assert.match(plain(composeFrame(w.state, { now: Date.now(), cols: 72, view: 1 })), /trace/);
+  assert.match(plain(composeFrame(w.state, { now: Date.now(), cols: 72, view: 2 })), /trace/);
+});
+
+// ── The cycle position marker ────────────────────────────────────────────────
+
+test('the position marker appears only once the cycle outgrows the built-in views', (t) => {
+  const w = world(t);
+  fs.writeFileSync(path.join(w.state, 'last-status.json'), JSON.stringify({
+    model: { display_name: 'Opus 5' }, rate_limits: {}, cost: { total_cost_usd: 1 },
+  }));
+  const at = (/** @type {number} */ view, /** @type {any[]} */ panes) =>
+    plain(composeFrame(w.state, { now: Date.now(), cols: 44, view, panes }));
+
+  // Ruled 2026-08-05. The git pane made the cycle two views long for EVERYONE,
+  // and numbering those two would have put an "n/N" on the economy panel of
+  // every user who has configured nothing — a change to a shipped surface,
+  // bought for nothing, since two self-identifying views need no numbering.
+  for (const view of [0, 1]) {
+    assert.doesNotMatch(at(view, []), /\d+\/\d+/,
+      `view ${view} must carry no position marker when nothing is configured`);
+  }
+
+  // Configure one pane and the markers come back — a user who already had them
+  // keeps them, renumbered for the longer cycle.
+  fs.writeFileSync(w.blob, JSON.stringify(GOLDEN));
+  const panes = [{ path: w.blob, source: w.blob }];
+  assert.match(at(0, panes), /1\/3/, 'the economy panel numbers itself once there is a cycle to number');
+  assert.match(at(1, panes), /2\/3/, 'the git pane takes position 2');
+  assert.match(at(2, panes), /3\/3/, 'the configured pane takes position 3');
 });
 
 // ── The key → view seam ──────────────────────────────────────────────────────
@@ -124,7 +154,7 @@ test('a blob with more rows than the pane height collapses to "+N more" in produ
 
   // `rows` is the PANE HEIGHT, exactly what composeFrame gets from the terminal.
   const out = plain(composeFrame(w.state, {
-    now: Date.now(), cols: 72, rows: 12, view: 1,
+    now: Date.now(), cols: 72, rows: 12, view: 2,
     panes: [{ path: w.blob, source: w.blob }],
   }));
 

@@ -21,7 +21,7 @@ Feature: Windows native launcher
     Then exactly one Windows Terminal window opens with two panes
     And the left pane runs Claude Code via `claude --settings <temp-file>`
     And the right pane runs `ccr sidecar` at approximately 34% width
-    And both panes receive CCR_STATE_DIR pointing at "~/.ccr"
+    And both panes receive CCR_STATE_DIR pointing at "~/.ccr/instances/1"
     And the process exits 0
 
   @AC2
@@ -36,8 +36,8 @@ Feature: Windows native launcher
     And the CCS profile directory "~/.ccs/instances/c1" exists
     When I run "ccr c1"
     Then the left pane runs Claude Code via `ccs c1 --settings <temp-file>`
-    And both panes receive CCR_STATE_DIR pointing at "~/.ccr/c1"
-    And the tmux-equivalent session name is "ccr-c1"
+    And both panes receive CCR_STATE_DIR pointing at "~/.ccr/instances/1"
+    And the profile launch slots like a bare one, session "ccr"
 
   @AC6
   Scenario: Unknown CCS profile errors clearly and lists available profiles

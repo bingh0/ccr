@@ -50,6 +50,16 @@ function makeDeps(o = {}) {
     existsDir: o.existsDir || (() => true),
     listDir: o.listDir || (() => ['c1', 'c2']),
     ensureDir: (d) => calls.ensureDir.push(d),
+    // Slot allocation touches the real filesystem, so stub it here rather than
+    // relying on the fake home being unwritable. Default: slot 1 under the
+    // instances container — EVERY launch slots now, profiled or bare;
+    // features/instance-slots.feature owns the allocation behaviour itself.
+    prepareInstance: o.prepareInstance || (() => ({ name: 'stub', title: 'stub' })),
+    allocateSlot: o.allocateSlot || (() => ({
+      slot: 1, session: 'ccr',
+      stateDir: path.join(o.home || '/home/me', '.ccr', 'instances', '1'),
+      attached: false,
+    })),
     removeExited: (d) => calls.removeExited.push(d),
     writeSettings: o.writeSettings || (() => { calls.writeSettings++; return 'C:\\Temp\\ccr-settings-x.json'; }),
     cleanup: (f) => calls.cleanup.push(f),
@@ -69,7 +79,7 @@ test('run: bare ccr opens a split window with both panes carrying CCR_STATE_DIR 
   assert.ok(args.includes('new-tab'));
   assert.ok(args.includes('split-pane'));
 
-  const stateDir = path.join('/home/me', '.ccr');
+  const stateDir = path.join('/home/me', '.ccr', 'instances', '1');
   const panes = args.filter((a) => a.startsWith('set "CCR_STATE_DIR='));
   assert.strictEqual(panes.length, 2);
   assert.ok(panes.every((p) => p.includes(stateDir)));
@@ -77,6 +87,51 @@ test('run: bare ccr opens a split window with both panes carrying CCR_STATE_DIR 
   assert.ok(calls.ensureDir.includes(stateDir));
   assert.ok(calls.removeExited.includes(stateDir));
   assert.strictEqual(calls.writeSettings, 1);
+});
+
+test('run: an allocated instance slot reaches both panes', () => {
+  // The second concurrent bare launch: the allocator hands back slot 2, and the
+  // whole window — both panes' CCR_STATE_DIR, the state dir prepared on disk —
+  // has to follow it, or the two instances share a snapshot again.
+  const slot2 = path.join('/home/me', '.ccr', 'instances', '2');
+  const { deps, calls } = makeDeps({
+    allocateSlot: () => ({ slot: 2, session: 'ccr-2', stateDir: slot2, attached: false }),
+  });
+  assert.strictEqual(run(undefined, deps), 0);
+
+  const panes = calls.spawnWt[0].args.filter((a) => a.startsWith('set "CCR_STATE_DIR='));
+  assert.strictEqual(panes.length, 2);
+  assert.ok(panes.every((p) => p.includes(slot2)), 'both panes carry the slot dir');
+  assert.ok(calls.ensureDir.includes(slot2));
+  assert.ok(calls.removeExited.includes(slot2));
+});
+
+test('run: a named profile slots like a bare launch', () => {
+  // The profiles-removal ruling: a profile's old per-profile namespace let two
+  // launches of the SAME profile kill-session each other. The allocator is
+  // still told which profile was named (the join key records it), but the
+  // namespace is the slot's.
+  /** @type {any[]} */
+  const asked = [];
+  const slot1 = path.join('/home/me', '.ccr', 'instances', '1');
+  const { deps, calls } = makeDeps({
+    allocateSlot: (o) => { asked.push(o); return { slot: 1, session: 'ccr', stateDir: slot1, attached: false }; },
+  });
+  run('c1', deps);
+  assert.strictEqual(asked.length, 1);
+  assert.strictEqual(asked[0].profile, 'c1', 'the allocator is told which profile was named');
+  assert.ok(calls.ensureDir.includes(slot1), 'the profile session lives in its slot dir');
+});
+
+test('run: the instance title reaches the Windows Terminal tab', () => {
+  // Fix for the half-lit platform: naming/title used to live on the tmux path
+  // only, so a Windows tab stayed "Claude" and its instance had no name.
+  const { deps, calls } = makeDeps({
+    prepareInstance: (slot, o) => ({ name: 'a', title: `${o.profile} / a` }),
+  });
+  run('c1', deps, { name: null });
+  const { args } = calls.spawnWt[0];
+  assert.strictEqual(args[args.indexOf('--title') + 1], 'c1 / a');
 });
 
 test('run: honors CCR_SIDEBAR_PCT (@AC2)', () => {
@@ -92,7 +147,7 @@ test('run: ccr <profile> targets the CCS state dir (@AC6)', () => {
 
   const { args } = calls.spawnWt[0];
   assert.match(args[7], /ccs c1 --settings/);
-  const stateDir = path.join('/home/me', '.ccr', 'c1');
+  const stateDir = path.join('/home/me', '.ccr', 'instances', '1');
   assert.ok(args.filter((a) => a.startsWith('set "CCR_STATE_DIR=')).every((p) => p.includes(stateDir)));
 });
 

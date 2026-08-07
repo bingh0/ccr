@@ -140,4 +140,52 @@ function fmtReset(/** @type {number|null} */ min) {
   return `${m}m`;
 }
 
-module.exports = { e, dim, bold, green, red, yellow, cyan, flash, pctColor, bar, clampVisible, tok, fmtMins, fmtReset };
+/**
+ * Terminal columns a PLAIN string occupies — the same accounting `clampVisible`
+ * does, exposed for the callers that must budget space before they build a line
+ * rather than clamp one afterwards. No SGR handling: the strings measured here
+ * are display text before any colour is applied.
+ * @param {string} s
+ * @returns {number}
+ */
+function visibleWidth(s) {
+  let w = 0;
+  for (const ch of s) w += charWidth(/** @type {number} */ (ch.codePointAt(0)));
+  return w;
+}
+
+/**
+ * Fit plain text into `cols` columns, marking the cut with an ellipsis so a
+ * shortened value never reads as a complete one. Cutting is by code point and
+ * by COLUMN (a wide glyph costs two), and the ellipsis is inside the budget —
+ * the result is never wider than `cols`.
+ *
+ * Distinct from `clampVisible`, which is the hard safety net applied to a
+ * finished line: this one is composition, so the caller can lay out around a
+ * value it knows will fit. Returns '' for a non-positive budget.
+ *
+ * @param {string} s
+ * @param {number} cols
+ * @returns {string}
+ */
+function ellipsize(s, cols) {
+  if (!(typeof cols === 'number' && cols > 0)) return '';
+  if (visibleWidth(s) <= cols) return s;
+  // One column is spent on the ellipsis, so the text gets cols-1. At cols === 1
+  // that leaves nothing, and the ellipsis alone is the honest answer.
+  const budget = cols - 1;
+  let out = '';
+  let w = 0;
+  for (const ch of s) {
+    const cw = charWidth(/** @type {number} */ (ch.codePointAt(0)));
+    if (w + cw > budget) break;
+    out += ch;
+    w += cw;
+  }
+  return out + '…';
+}
+
+module.exports = {
+  e, dim, bold, green, red, yellow, cyan, flash, pctColor, bar, clampVisible, tok, fmtMins, fmtReset,
+  charWidth, visibleWidth, ellipsize,
+};

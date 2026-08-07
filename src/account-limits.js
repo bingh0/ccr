@@ -33,7 +33,8 @@ const { parseResetsAt } = require('./burn');
 const { modelScope } = require('./rate-limits');
 
 const MAX_SNAPSHOT_BYTES = 1_000_000; // a status JSON is a few KB; bound parse/disk
-const MAX_PROFILES = 32;              // sanity cap on how many siblings we scan
+const MAX_PROFILES = 32;              // sanity cap on how many siblings we merge
+const MAX_SCAN_ENTRIES = 512;         // sanity cap on how many dir entries we inspect
 
 /**
  * Canonical reset instant for fingerprinting/matching — tolerant of CC reporting
@@ -127,12 +128,14 @@ function readSiblingRateLimits(file) {
  * reconcile the local meters against them. Best-effort — returns `localRl` on any
  * problem so it can wrap the render path without a guard at the call site.
  *
- * Engages ONLY for the launcher's profile layout (`~/.ccr/<profile>`): the state
- * dir's parent must be `~/.ccr`. For ad-hoc `~/.ccr` or a custom CCR_STATE_DIR we
- * have no sibling set to trust, so we behave exactly as before (no merge).
+ * Engages ONLY for the launcher's layout: instances under `~/.ccr/instances/`
+ * (the 0.4.0 container/member split — src/instance-slot.js). A custom
+ * CCR_STATE_DIR elsewhere has no sibling set to trust, so it behaves as
+ * before (no merge). There is no slot-1 special case any more: slot 1 is an
+ * ordinary member of instances/, which is exactly why the layout changed.
  *
  * @param {any} localRl the local snapshot's `rate_limits`
- * @param {string} stateDir the local profile's state dir (CCR_STATE_DIR)
+ * @param {string} stateDir the local instance's state dir (CCR_STATE_DIR)
  * @param {{ home?: string }} [opts]
  * @returns {any}
  */
@@ -140,21 +143,26 @@ function freshenAccountLimits(localRl, stateDir, opts = {}) {
   try {
     if (!localRl || typeof localRl !== 'object') return localRl;
     const home = opts.home || os.homedir();
-    const root = path.dirname(path.resolve(stateDir));
-    if (root !== path.resolve(path.join(home, '.ccr'))) return localRl; // not a profile layout
+    const root = path.resolve(path.join(home, '.ccr', 'instances'));
+    const self = path.resolve(stateDir);
+    if (path.dirname(self) !== root) return localRl; // not the launcher's layout
     const selfFile = path.resolve(path.join(stateDir, 'last-status.json'));
 
     /** @type {any[]} */
     const siblings = [];
+    // Bound the WALK, not just the harvest: MAX_PROFILES alone counts collected
+    // siblings, so entries that yield nothing — slot dirs with no snapshot yet,
+    // junk — would all be stat'd on every tick. This runs inside the sidecar's
+    // ~1s draw loop, so the scan stays capped by entries seen even though
+    // instances/ holds only instance dirs under the 0.4.0 layout.
+    let seen = 0;
     for (const name of fs.readdirSync(root)) {
-      if (siblings.length >= MAX_PROFILES) break;
+      if (siblings.length >= MAX_PROFILES || ++seen > MAX_SCAN_ENTRIES) break;
       const p = path.join(root, name);
       let st; try { st = fs.statSync(p); } catch { continue; }
-      // A sibling profile dir (~/.ccr/<name>/last-status.json) or the ad-hoc
-      // ~/.ccr/last-status.json file itself.
-      const file = st.isDirectory() ? path.join(p, 'last-status.json')
-        : (name === 'last-status.json' ? p : null);
-      if (!file || path.resolve(file) === selfFile) continue;
+      if (!st.isDirectory()) continue;
+      const file = path.join(p, 'last-status.json');
+      if (path.resolve(file) === selfFile) continue;
       const rl = readSiblingRateLimits(file);
       if (rl) siblings.push(rl);
     }

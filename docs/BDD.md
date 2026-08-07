@@ -1,8 +1,12 @@
 # Acceptance criteria in ccr — and how they relate to conventional BDD
 
-ccr's behaviour is specified in [`features/`](../features/): 17 feature files,
-154 scenarios, 1,442 lines, executed on every run by
-[`test/features.test.js`](../test/features.test.js).
+ccr's behaviour is specified in [`features/`](../features/), executed on every
+run by [`test/features.test.js`](../test/features.test.js).
+
+*The statistics below describe the corpus as this essay was written (0.3.0:
+17 feature files, 154 scenarios, 1,442 lines). The corpus has grown since —
+26 files and 271 scenarios at 0.4.0 — but the analysis is of that snapshot,
+and its per-count claims are left as written rather than silently restated.*
 
 This document describes what that practice **is** — what it took from
 conventional BDD, where it departed, and what the departures were for. Every
@@ -149,7 +153,7 @@ The practice in this repository is one point on a line:
 
 | | |
 |---|---|
-| **treecontext** | no feature files at all |
+| *(a private predecessor)* | no feature files at all |
 | **ccr** | **agent-driven BDD 1.0** — strict grammar plus the anti-silence guards above |
 | **gherkin-node-test / gherkin-cargo-test** | 1.5 — separating user-facing acceptance from developer-facing design review, and the first scope interview |
 | **gherkin-trace** | 2.0 — the de novo, end-to-end example of the developed method (forthcoming) |

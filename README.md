@@ -24,9 +24,15 @@ shows you the **economy** of a session:
 - **Resume advisor** (`ccr resume`) — recent sessions ranked by what they'd cost
   to bring back (context size, share of the window, cold/warm cache), then it
   hands selection to `claude --resume`.
+- **Git pane** — press **F3** in the sidebar for the repo each tab is in: the
+  repo and branch, what's staged / modified / untracked / conflicted, and
+  recent commits drawn in lanes like an IDE git graph. Read from `.git`
+  directly (packfiles included) — no `git` binary is ever run, and the pane
+  can't write or execute anything, structurally.
 - **External tool panes** — the sidebar can render read-only status panes from
   other tools via a strict JSON contract; **F3** cycles between the economy
-  panel and each configured pane (see [External tool panes](#external-tool-panes-sidebar)).
+  panel, the built-in git pane, and each configured pane (see
+  [External tool panes](#external-tool-panes-sidebar)).
 
 For scripting and external tools (status bars, menu-bar widgets), `ccr economy
 --json` emits a stable, versioned model — see
@@ -86,8 +92,8 @@ The split is a **one-time** setup per VS Code window: an attached sidecar picks
 each new `ccr` session up automatically, so relaunching prints a short note
 instead of the banner. And if you do paste the one-liner into a second pane, the
 older pane stands down by itself — there is never more than one live sidebar per
-session. Profiles stay independent: a personal `ccr` and a work `ccr <profile>`
-run side by side, each with its own state dir and its own sidebar.
+session. Instances stay independent — see
+[Running more than one](#running-more-than-one) below.
 
 On **Windows** this is the default inside VS Code (Windows Terminal otherwise
 opens a separate window, so the in-editor split is nicer). On **Linux/macOS**,
@@ -97,6 +103,56 @@ opens a separate window, so the in-editor split is nicer). On **Linux/macOS**,
 > Automating the split keystroke itself would need a VS Code extension (the `code`
 > CLI has no "run command" verb) — out of scope for the zero-dependency core. The
 > clipboard + `--hint` reduce it to split-and-paste.
+
+## Running more than one
+
+Open a second terminal and run `ccr` again. That's the whole procedure — nothing
+to name, no flag. Each instance gets its own state dir, its own sidebar, and its
+own tmux session and socket, so starting, clearing or quitting one never touches
+the other. This holds for CCS profiles too: two `ccr cq` at once are two
+independent instances of the same account.
+
+**Instances are ephemeral.** State lives under `~/.ccr/instances/<n>` for the
+session's lifetime and is deleted when it ends. Slots are **reused** — quit the
+second instance and the next `ccr` takes slot 2 back rather than counting upward
+forever. What outlives an instance lives at the top of `~/.ccr`: account burn
+history, and a small per-session join log (`session-<id>.jsonl` — which
+instance, profile and directory a Claude session ran as, for when you're
+reconstructing what happened) — both pruned 31 days after their session ends.
+Up to 32 instances can be live at once; a 33rd launch refuses rather than
+sharing state. Account-wide meters (the 5h and weekly walls) are reconciled
+across live instances, so two sidebars agree even when one has been idle.
+
+**Every instance has a name.** By default it's the repository (or directory)
+you launched from — a second instance from the same repo becomes `gitrepo2` —
+or pick one with `ccr --name side-project`. Characters outside `A-Za-z0-9._-`
+become `-`; an explicit `--name` is rejected rather than repaired, and refused
+if that name is already live. The name is how you see and address an instance:
+
+- the **terminal tab title** is `name` (or `profile / name`), set once at
+  launch and never changed mid-session — it is the tab's address;
+- the **status line** leads with `name @ location`, and the location is live —
+  it follows a mid-session `cd`, and is dropped when it would only repeat the
+  name;
+- the **sidebar** heads every view with the name;
+- **`-i <name>`** targets a live instance from anywhere: `ccr economy -i
+  side-project`, `ccr sidecar -i …`, `ccr cycle-view -i …`. Without `-i`,
+  those three commands resolve the instance from your working directory (the
+  live instance whose launch directory contains it) — and when that's
+  ambiguous they list the candidates instead of guessing. Every panel is
+  headed by the name it resolved to.
+
+Setting `CCR_STATE_DIR` (and/or `CCR_SESSION`) still pins an instance wherever
+you want it, and always wins over the automatic choice.
+
+**Upgrading from 0.3:** the first launch migrates `~/.ccr` once — burn history
+moves to the top of the container and old per-profile state dirs are swept
+(they held nothing else that outlives a session). Migration refuses while any
+old session is still running, and names what to close.
+
+> `tmux ls` won't list ccr's sessions — each runs on its own socket. Use
+> `tmux -L ccr ls` (or `-L ccr-2` for slot 2 — profile launches ride slot
+> sockets too now).
 
 ## Wiring the statusline into Claude Code
 
@@ -114,8 +170,18 @@ latency.)
 
 The live sidebar can host **read-only panes from other tools**. A tool writes a
 small JSON blob beside its own artifacts; you list that file's path in ccr's
-config; the sidebar cycles between the economy panel and each configured pane
-(**F3** under tmux — the launcher binds it; `ccr cycle-view` on any host).
+config; the sidebar cycles between the economy panel, the built-in git pane, and
+each configured pane.
+
+**Cycling views.** Under tmux the launcher binds **F3**. VS Code and its forks
+(Cursor, Positron, Antigravity) bind no key and leave both split panes running a
+foreground process, so the pasted sidecar one-liner carries `--keys`: click that
+pane and press **Space** (or **F3**). The renderer still reads no input — the key
+lives in a separate parent process that runs the panel as a child, the same
+separation tmux enforces. Anywhere else, `ccr cycle-view -i <name>` (or
+`--state-dir <dir>`); a bare `ccr cycle-view` resolves the instance from your
+working directory, like `ccr economy` does.
+`ccr sidecar --view <n>` opens on a chosen view (0 economy, 1 git, 2+ panes).
 
 Config lives at `~/.config/ccr/config.json` (`$XDG_CONFIG_HOME` respected,
 `CCR_CONFIG` overrides) — deliberately *not* in ccr's state dir, and never
@@ -129,7 +195,7 @@ A pane is a full-height view carrying the producing tool's own rows — here
 `gherkin-trace`, whose blob ships as the golden example:
 
 ```
-trace  gherkin-trace   2/2
+trace  gherkin-trace   3/3
   refresh · 2026-08-01 14:10 · blob written 0s
 
   ● attention     3   1 breach, 2 orphans
@@ -147,10 +213,13 @@ trace  gherkin-trace   2/2
   stripped of control bytes before it touches your terminal.
 - **Producers never know ccr exists.** You wire the join by hand, exactly like
   Claude Code's own `statusLine` — neither side takes a dependency on the other.
-- **Config order is cycle order.** F3 goes economy panel → first pane → second
-  pane → back to economy; the `2/2` above is that position. Entries are never
-  de-duplicated, so listing one path twice gives you two panes. The config is
-  re-read every tick — adding a pane takes effect without relaunching.
+- **Config order is cycle order.** F3 goes economy panel → git pane → first pane
+  → second pane → back to economy; the `3/3` above is that position, for the one
+  configured pane in the example. The position marker appears only once you have
+  configured a pane — the two built-in views identify themselves, so numbering
+  them buys nothing. Entries are never de-duplicated, so listing one path twice
+  gives you two panes. The config is re-read every tick — adding a pane takes
+  effect without relaunching.
 - **The producer is trusted for content, never for behaviour.** ccr executes
   nothing from a blob and draws no value it has not validated, so a hostile file
   cannot crash the panel or escape into your terminal — but what a pane *says*
@@ -177,7 +246,7 @@ canonical source; `test/gherkin.js` is a vendored copy). See
 and the API.
 
 The *practice* is documented separately in [`docs/BDD.md`](docs/BDD.md): what
-these 154 scenarios took from conventional BDD, where they departed — refusals
+these scenarios (271 of them, at 0.4.0) took from conventional BDD, where they departed — refusals
 as a quarter of the specification, tags that are gates rather than filters,
 comments that carry rulings — and why. It also places ccr in the lineage the
 method has followed since, and is honest about which point on that line this

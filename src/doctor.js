@@ -91,13 +91,24 @@ function run(opts = {}) {
     out.push(dim('· ccs not installed (optional — only for `ccr <profile>`)'));
   }
 
-  // newest captured snapshot across ~/.ccr and its per-profile subdirs (state
-  // lives under the user's home now, never world-shared /tmp).
+  // newest captured snapshot across the container. Instances live TWO levels
+  // down under the 0.4.0 layout (~/.ccr/instances/<n>/last-status.json) — the
+  // one-level scan alone would report "no status captured" while instances run
+  // fine (features/instance-lifecycle.feature: "doctor finds a live instance's
+  // captured status"). The root and one-level entries are still scanned so a
+  // pre-migration home keeps diagnosing.
   const ccrDir = path.join(homedir, '.ccr');
   const dirs = [ccrDir];
   try {
     for (const d of fs.readdirSync(ccrDir)) {
       const sub = path.join(ccrDir, d);
+      try { if (fs.statSync(sub).isDirectory()) dirs.push(sub); } catch { /* ignore */ }
+    }
+  } catch { /* none */ }
+  try {
+    const inst = path.join(ccrDir, 'instances');
+    for (const d of fs.readdirSync(inst)) {
+      const sub = path.join(inst, d);
       try { if (fs.statSync(sub).isDirectory()) dirs.push(sub); } catch { /* ignore */ }
     }
   } catch { /* none */ }

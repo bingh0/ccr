@@ -102,6 +102,31 @@ Feature: Live sidecar hosting
     Then the check completes without blocking
     And no advance is reported
 
+  # --- The launcher must fail loudly, never silently ---
+
+  Scenario: A machine with no nvm gets a clear error instead of silence
+    # The launcher prefers the newest nvm-installed node and falls back to PATH.
+    # Under `set -euo pipefail` the glob missing made `ls` fail, pipefail
+    # propagated it, and the failing command substitution aborted the whole
+    # script — exit 2, no message, no sidebar, and the PATH fallback two lines
+    # below never reached. That is exactly the "plain Claude Code, no nvm" user.
+    Given a machine with no ~/.nvm and no node on PATH
+    When the tmux launcher runs
+    Then it reports that node was not found
+    And it does not abort before reaching that check
+
+  @security
+  Scenario: A non-regular file at the heartbeat path cannot wedge the sidebar
+    # Everything in the state dir is writable by anything running as the user.
+    # A symlink there would turn a heartbeat into an arbitrary-file write; a FIFO
+    # is quieter and worse — opening one for write blocks until a reader appears,
+    # which freezes the draw loop with no error at all. Instance slots multiplied
+    # the plantable state dirs, so the guard covers anything not a regular file.
+    Given a fifo planted where the sidecar writes its heartbeat
+    When the sidecar beats
+    Then the beat completes without blocking
+    And the heartbeat is a regular file again
+
   Scenario: Concurrent profiles are isolated on per-profile tmux sockets
     # All instances used to share the default tmux server — a single point of
     # failure. One kill-server (2026-08-02: an agent inside one instance ran

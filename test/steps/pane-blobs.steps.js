@@ -81,6 +81,23 @@ module.exports = function definePaneBlobsSteps(reg) {
     || frame.split('\n').some((l) => l.trim().length >= 16 && source.startsWith(l.trim()));
 
   /**
+   * The view cycle, as a rule rather than as numbers scattered through the
+   * assertions: index 0 is ccr's economy view, index 1 is the built-in git
+   * pane, and the i-th CONFIGURED pane is index 2+i. Displayed positions are
+   * 1-based over the whole cycle.
+   *
+   * These exist because the cycle gained a view (the git pane) and every
+   * hardcoded `2/2` in this file became wrong at once. A binding that states
+   * the rule survives the next view; one that states a number has to be found
+   * and chased, and the ones that are merely *loose* enough to keep passing are
+   * the dangerous half.
+   */
+  const paneView = (i = 0) => 2 + i;
+  const cycleLen = (/** @type {Record<string, any>} */ w) => 2 + w.panes.length;
+  const panePos = (/** @type {Record<string, any>} */ w, i = 0) => `${paneView(i) + 1}/${cycleLen(w)}`;
+  const atPos = (/** @type {string} */ p) => new RegExp(p.replace('/', '\\/'));
+
+  /**
    * Render the configured pane through the whole real wiring.
    * A scenario that needs a pane-HEIGHT budget (row overflow) sets `w.maxRows`;
    * composeFrame sizes itself to the real pane and has no such knob, so those
@@ -90,9 +107,9 @@ module.exports = function definePaneBlobsSteps(reg) {
     const cols = opts.cols || 72;
     if (w.maxRows) {
       const res = loadPaneBlob(w.blobPath, { now: w.now || Date.now() });
-      w.frame = renderPane(res, { source: w.source, position: '2/2', width: cols, maxRows: w.maxRows });
+      w.frame = renderPane(res, { source: w.source, position: panePos(w), width: cols, maxRows: w.maxRows });
     } else {
-      w.frame = composeFrame(w.stateDir, { now: w.now || Date.now(), view: 1, panes: w.panes, cols });
+      w.frame = composeFrame(w.stateDir, { now: w.now || Date.now(), view: paneView(), panes: w.panes, cols });
     }
     w.plain = plain(w.frame);
     return w.frame;
@@ -118,12 +135,18 @@ module.exports = function definePaneBlobsSteps(reg) {
   });
   reg.define(/^the sidecar starts$/, (w) => { writeBlob(w, GOLDEN); render(w); });
   reg.define(/^exactly one external pane joins the view cycle$/, (w) => {
-    // View 0 is ccr's own economy view; 1 is the single configured pane, and 2
-    // wraps back to 0 — which is what "exactly one" means for a cycle.
-    const v1 = plain(composeFrame(w.stateDir, { view: 1, panes: w.panes, cols: 72 }));
-    const v2 = plain(composeFrame(w.stateDir, { view: 2, panes: w.panes, cols: 72 }));
-    assert.match(v1, /2\/2/, 'the pane is position 2 of 2');
-    assert.ok(!/2\/2/.test(v2), 'index 2 wraps to ccr\'s own view rather than inventing a pane');
+    // "Exactly one" is a claim about the cycle's LENGTH: the configured pane
+    // occupies its own index, and the very next index wraps to the start rather
+    // than inventing a second pane. Both halves matter — the wrap is what makes
+    // it one rather than many.
+    const atPane = plain(composeFrame(w.stateDir, { view: paneView(), panes: w.panes, cols: 72 }));
+    const past = plain(composeFrame(w.stateDir, { view: cycleLen(w), panes: w.panes, cols: 72 }));
+    assert.match(atPane, atPos(panePos(w)), `the pane is position ${panePos(w)}`);
+    assert.ok(!atPos(panePos(w)).test(past), 'the index past the last pane wraps rather than inventing one');
+    // "Wraps" precisely: the frame past the end IS the frame at the start. This
+    // says it without depending on what view 0 happens to be showing — an empty
+    // state dir legitimately renders the waiting line rather than the economy.
+    assert.strictEqual(past, plain(composeFrame(w.stateDir, { view: 0, panes: w.panes, cols: 72 })));
   });
   reg.define(/^the sidecar reads no path it was not given$/, () => {
     // Structural: discovery is configuration, so nothing in the pane path may
@@ -393,7 +416,7 @@ module.exports = function definePaneBlobsSteps(reg) {
   reg.define(/^the sidecar ticks three times$/, (w) => {
     w.frames = [];
     const started = Date.now();
-    for (let i = 0; i < 3; i++) w.frames.push(composeFrame(w.stateDir, { view: 1, panes: w.panes, cols: 72 }));
+    for (let i = 0; i < 3; i++) w.frames.push(composeFrame(w.stateDir, { view: paneView(), panes: w.panes, cols: 72 }));
     w.elapsed = Date.now() - started;
   });
   reg.define(/^all three ticks complete on schedule$/, (w) => {
@@ -469,7 +492,7 @@ module.exports = function definePaneBlobsSteps(reg) {
     assert.ok(namesSource(w.plain, w.source), 'the configured path is named');
   });
   reg.define(/^the pane is not skipped from the view cycle$/, (w) => {
-    assert.match(w.plain, /2\/2/, 'a configured pane keeps its position even with no blob');
+    assert.match(w.plain, atPos(panePos(w)), 'a configured pane keeps its position even with no blob');
   });
 
   reg.define(/^the file at the configured path is not parseable JSON this tick$/, (w) => {
@@ -701,18 +724,23 @@ module.exports = function definePaneBlobsSteps(reg) {
     }));
   });
   reg.define(/^the user cycles the sidecar style$/, (w) => {
-    w.views = [0, 1, 2].map((v) => plain(composeFrame(w.stateDir, { view: v, panes: w.panes, cols: 72 })));
+    // Economy, then each configured pane at its own index. The built-in git
+    // pane sits between them and is not what this scenario is about, so it is
+    // stepped over rather than asserted here.
+    w.views = [0, paneView(0), paneView(1)]
+      .map((v) => plain(composeFrame(w.stateDir, { view: v, panes: w.panes, cols: 72 })));
   });
   reg.define(/^each external pane appears as a whole-pane view in configuration order$/, (w) => {
-    assert.match(w.views[0], /economy/, 'view 0 is ccr\'s own');
-    assert.match(w.views[1], /trace/, 'view 1 is the first configured pane');
-    assert.match(w.views[2], /second/, 'view 2 is the second configured pane');
+    assert.match(w.views[0], /economy/, 'the first view is ccr\'s own');
+    assert.match(w.views[1], /trace/, 'the first configured pane comes first');
+    assert.match(w.views[2], /second/, 'the second configured pane comes second');
     assert.ok(!w.views[1].includes('second'), 'panes are whole views, never combined');
   });
   reg.define(/^the chrome shows the pane's position in the cycle$/, (w) => {
-    assert.match(w.views[0], /1\/3/);
-    assert.match(w.views[1], /2\/3/);
-    assert.match(w.views[2], /3\/3/);
+    const n = cycleLen(w);
+    assert.match(w.views[0], atPos(`1/${n}`), 'the economy view names its own position');
+    assert.match(w.views[1], atPos(panePos(w, 0)));
+    assert.match(w.views[2], atPos(panePos(w, 1)));
   });
   reg.define(/^no view is truncated to stack beside another$/, (w) => {
     assert.ok(!w.views[1].includes('economy'), 'a pane view never shares the pane with the economy panel');

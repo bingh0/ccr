@@ -31,6 +31,24 @@ function deps(/** @type {Record<string, any>} */ w) {
     existsDir: () => !!w.existsProfile,
     listDir: () => ['c1', 'c2'],
     ensureDir: () => {},
+    // Slot allocation is REAL filesystem work against `home`. Unstubbed it
+    // probes and creates ~/.ccr/2… under the fake home — which fails on a dev
+    // box (/home/me is unwritable) and SUCCEEDS in a container running as root,
+    // making these scenarios pass or fail by machine. Worse for this feature
+    // specifically: a real slot carries attached=false, which would silently
+    // override the `sidecarAlive` Given that the attached-relaunch scenario is
+    // built on. Default to "no slot" — the historical namespace — so these
+    // scenarios test the launcher; features/instance-slots.feature owns the rest.
+    // Modelled on the real allocator rather than stubbed to null: EVERY launch
+    // gets a slot in production — profiled or bare — so returning null here
+    // would quietly point scenarios at the env-override path instead. Slot 1's
+    // `attached` verdict is the same heartbeat question these scenarios already
+    // drive through `sidecarAlive`.
+    prepareInstance: () => ({ name: 'stub', title: 'stub' }),
+    allocateSlot: w.allocateSlot || (() => ({
+      slot: 1, session: 'ccr', stateDir: path.join(w.home || '/home/me', '.ccr', 'instances', '1'), attached: !!w.sidecarAlive,
+    })),
+    releaseSlot: () => {},
     removeExited: () => {},
     dropExited: () => { w.droppedExited++; },
     writeSettings: () => 'C:\\Temp\\ccr-settings-x.json',
@@ -75,9 +93,23 @@ module.exports = function defineVscodeSidecarSteps(reg) {
   reg.define(/^the banner shows the split keybinding "([^"]+)"$/, (w, key) => assert.ok(w.out.includes(key), `${key} not in: ${w.out}`));
 
   reg.define(/^the sidecar one-liner targets the resolved state dir by argument$/, (w) => {
-    assert.match(w.out, /sidecar --state-dir ".*\.ccr"/);
+    assert.match(w.out, /sidecar --state-dir ".*\.ccr.instances.1"/);
   });
   reg.define(/^it is copied to the clipboard via an OSC 52 escape$/, (w) => assert.strictEqual(w.osc52, true));
+
+  reg.define(/^the sidecar one-liner asks for the key reader$/, (w) => {
+    // Ordered, not merely present: `--keys` has to survive on the same command
+    // as the state dir, since the pasted line is the only thing the user runs.
+    assert.match(w.out, /sidecar --state-dir ".*\.ccr.instances.1" --keys/);
+  });
+
+  reg.define(/^the banner names the keys that cycle the views$/, (w) => {
+    // A key nothing on screen mentions is a key nobody presses — this host shows
+    // no other hint that a second view exists.
+    for (const key of ['Space', 'F3']) {
+      assert.ok(w.out.includes(key), `the banner never names ${key}:\n${w.out}`);
+    }
+  });
 
   reg.define(/^the "exited" sentinel is dropped in the state dir$/, (w) => assert.ok(w.droppedExited >= 1));
   reg.define(/^the temp settings file is cleaned up$/, (w) => assert.ok(w.cleaned.length >= 1));
@@ -89,14 +121,14 @@ module.exports = function defineVscodeSidecarSteps(reg) {
     assert.strictEqual(w.spawnedClaude.bin, 'ccs');
     assert.strictEqual(w.spawnedClaude.args[0], 'c1');
   });
-  reg.define(/^the sidecar one-liner targets the "~\/\.ccr\/c1" state dir$/, (w) => {
-    const expected = path.join(w.home || '/home/me', '.ccr', 'c1');
+  reg.define(/^the sidecar one-liner targets the "~\/\.ccr\/instances\/1" state dir$/, (w) => {
+    const expected = path.join(w.home || '/home/me', '.ccr', 'instances', '1');
     assert.ok(w.out.includes(`--state-dir "${expected}"`), w.out);
   });
   reg.define(/^stderr explains the profile was not found$/, (w) => assert.match(w.err, /not found/));
 
-  reg.define(/^Claude's environment carries CCR_STATE_DIR = the "~\/\.ccr\/c1" state dir$/, (w) => {
-    const expected = path.join(w.home || '/home/me', '.ccr', 'c1');
+  reg.define(/^Claude's environment carries CCR_STATE_DIR = the "~\/\.ccr\/instances\/1" state dir$/, (w) => {
+    const expected = path.join(w.home || '/home/me', '.ccr', 'instances', '1');
     assert.strictEqual(w.spawnedClaude.extraEnv && w.spawnedClaude.extraEnv.CCR_STATE_DIR, expected);
   });
 

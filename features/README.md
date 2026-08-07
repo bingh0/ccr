@@ -20,7 +20,8 @@ unit layer underneath; features stay behavioral.
 
 | Feature file | Tool / component | Criteria from |
 |---|---|---|
-| `account-limits.feature` | `src/account-limits.js` (cross-profile 5h/weekly reconciliation) | reported bug ("the sidecars don't agree") |
+| `account-limits.feature` | `src/account-limits.js` (cross-instance 5h/weekly reconciliation) | reported bug ("the sidecars don't agree") |
+| `instance-slots.feature` | `src/instance-slot.js` + every launcher's namespace choice | reported bug ("can't have two ccr up at once") |
 | `burn-rate.feature` | `src/burn.js` (windowEstimate / binding / clearROI) | gap analysis (Gaps 1–3) + backtest |
 | `economy.feature` | `src/render/economy.js` | readability review (R#/I# codes) |
 | `feed.feature` | `src/render/feed.js` + transcript events | design (live tool/skills feed) |
@@ -28,6 +29,22 @@ unit layer underneath; features stay behavioral.
 | `resume.feature` | `src/resume.js` + `src/render/resume.js` | design (resume-cost advisor, not a picker) |
 | `statusline.feature` | `src/render/statusline.js` | design (plain-text statusLine contract) |
 | `transcripts.feature` | `src/transcripts.js` | design (shared transcript spine) |
+
+### Scoped, not yet built
+
+These carry the reviewed acceptance criteria for the git pane, produced by a
+`/scope` interview on 2026-08-04 and confirmed by the visionary. They are listed
+in the `wip` register in `test/features.test.js`, so their scenarios show as TODO
+until steps bind — each basename must leave that list as it is built. The fence
+that goes with them is [`OUT-OF-SCOPE.md`](OUT-OF-SCOPE.md).
+
+| Feature file | Behavior |
+|---|---|
+| `git-repo-identity.feature` | which repo a tab is in, and the branch |
+| `git-working-tree.feature` | what is changed but not committed |
+| `git-commit-graph.feature` | recent history, drawn with its branch structure |
+| `git-pane-safety.feature` | a bad repo spoils at most its own pane |
+| `git-pane-placement.feature` | cycling alongside the economy panel, across instances |
 
 The Windows fast release and the VS Code split-terminal path trace to
 [`../SPEC.md`](../SPEC.md); their scenarios are tagged `@AC#` back to the

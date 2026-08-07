@@ -230,6 +230,74 @@ module.exports = function defineSidecarHostingSteps(reg) {
     assert.match(w.launchSh, /tmux -L '\$SOCKET_Q' kill-session -t '\$SESSION_Q'/, 'pane teardown targets its own socket');
   });
 
+  // Launcher robustness: fail loudly, never silently
+  reg.define(/^a machine with no ~\/\.nvm and no node on PATH$/, (w) => {
+    const { spawnSync } = require('node:child_process');
+    w.fakeHome = freshDir();
+    // A PATH with neither node nor tmux on it, so the launcher reaches its own
+    // dependency checks — provided it survives node RESOLUTION to get there.
+    w.emptyPath = freshDir();
+    w.defer(() => { for (const d of [w.fakeHome, w.emptyPath]) fs.rmSync(d, { recursive: true, force: true }); });
+    // The interpreter must be named absolutely: the child resolves its command
+    // against the PATH we are deliberately emptying. Windows is excluded the
+    // same way a bash-less host is — Git Bash answers `command -v bash` with a
+    // virtual /usr/bin path spawnSync cannot execute, and scripts/launch.sh is
+    // not a Windows surface (Windows has its own launcher).
+    w.bash = process.platform === 'win32'
+      ? ''
+      : spawnSync('sh', ['-c', 'command -v bash'], { encoding: 'utf8' }).stdout.trim();
+  });
+  reg.define(/^the tmux launcher runs$/, (w) => {
+    if (!w.bash) return; // no bash on this host — the launcher isn't reachable anyway
+    const { spawnSync } = require('node:child_process');
+    w.launch = spawnSync(w.bash, [path.join(__dirname, '..', '..', 'scripts', 'launch.sh')], {
+      env: { HOME: w.fakeHome, PATH: w.emptyPath },
+      encoding: 'utf8',
+      timeout: 20_000,
+    });
+  });
+  reg.define(/^it reports that node was not found$/, (w) => {
+    if (!w.bash) return;
+    assert.match(String(w.launch.stderr || ''), /ccr: node not found/);
+  });
+  reg.define(/^it does not abort before reaching that check$/, (w) => {
+    if (!w.bash) return;
+    // The regression: `set -e` killed the script at the nvm glob, so it exited 2
+    // with EMPTY stderr — no diagnosis, nothing to act on.
+    assert.strictEqual(w.launch.status, 1, "the launcher's own guard exits 1, not the shell's 2");
+    assert.notStrictEqual(String(w.launch.stderr || '').trim(), '', 'never a silent abort');
+  });
+
+  // Heartbeat write safety
+  reg.define(/^a fifo planted where the sidecar writes its heartbeat$/, (w) => {
+    const { spawnSync } = require('node:child_process');
+    w.dir = freshDir();
+    w.defer(() => fs.rmSync(w.dir, { recursive: true, force: true }));
+    const r = spawnSync('mkfifo', [path.join(w.dir, 'sidecar-alive')]);
+    if (r.status !== 0) { w.noFifo = true; return; } // no mkfifo (e.g. Windows)
+  });
+  reg.define(/^the sidecar beats$/, (w) => {
+    if (w.noFifo) return;
+    const { spawnSync } = require('node:child_process');
+    // In a CHILD with a timeout: a regressed guard blocks in writeFileSync
+    // forever, and a synchronous hang would take the whole test runner with it.
+    w.beat = spawnSync(process.execPath, [
+      '-e',
+      'require(process.argv[1]).heartbeatTick(process.argv[2], "1:2")',
+      path.join(__dirname, '..', '..', 'src', 'sidecar.js'),
+      w.dir,
+    ], { timeout: 10_000, encoding: 'utf8' });
+  });
+  reg.define(/^the beat completes without blocking$/, (w) => {
+    if (w.noFifo) return;
+    assert.strictEqual(w.beat.signal, null, 'the heartbeat write blocked on the fifo');
+    assert.strictEqual(w.beat.status, 0, w.beat.stderr);
+  });
+  reg.define(/^the heartbeat is a regular file again$/, (w) => {
+    if (w.noFifo) return;
+    assert.strictEqual(fs.lstatSync(path.join(w.dir, 'sidecar-alive')).isFile(), true);
+  });
+
   // Ended (sentinel round-trip)
   reg.define(/^the sidecar is rendering the live panel$/, (w) => {
     fs.writeFileSync(path.join(stateDir(w), 'last-status.json'), SAMPLE);

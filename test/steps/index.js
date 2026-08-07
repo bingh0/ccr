@@ -31,6 +31,19 @@ const defineVscodeSidecarSteps = require('./vscode-sidecar.steps');
 const defineAccountLimitsSteps = require('./account-limits.steps');
 const definePaneConfigSteps = require('./pane-config.steps');
 const definePaneBlobsSteps = require('./pane-blobs.steps');
+const defineInstanceSlotsSteps = require('./instance-slots.steps');
+const defineInstanceLifecycleSteps = require('./instance-lifecycle.steps');
+const defineInstanceMigrationSteps = require('./instance-migration.steps');
+const defineInstanceNamingSteps = require('./instance-naming.steps');
+const defineInstanceIdentitySteps = require('./instance-identity.steps');
+const defineInstanceResolutionSteps = require('./instance-resolution.steps');
+const defineInstancePersistenceSteps = require('./instance-persistence.steps');
+const defineGitRepoIdentitySteps = require('./git-repo-identity.steps');
+const defineGitPanePlacementSteps = require('./git-pane-placement.steps');
+const defineGitWorkingTreeSteps = require('./git-working-tree.steps');
+const defineGitCommitGraphSteps = require('./git-commit-graph.steps');
+const defineGitPaneSafetySteps = require('./git-pane-safety.steps');
+const defineSidecarHotkeysSteps = require('./sidecar-hotkeys.steps');
 
 /**
  * Feature-file basename → its step definer. A feature with no entry here runs
@@ -55,4 +68,17 @@ module.exports = {
   'account-limits': defineAccountLimitsSteps,
   'pane-config': definePaneConfigSteps,
   'pane-blobs': definePaneBlobsSteps,
+  'instance-slots': defineInstanceSlotsSteps,
+  'instance-lifecycle': defineInstanceLifecycleSteps,
+  'instance-migration': defineInstanceMigrationSteps,
+  'instance-naming': defineInstanceNamingSteps,
+  'instance-identity': defineInstanceIdentitySteps,
+  'instance-resolution': defineInstanceResolutionSteps,
+  'instance-persistence': defineInstancePersistenceSteps,
+  'git-repo-identity': defineGitRepoIdentitySteps,
+  'git-pane-placement': defineGitPanePlacementSteps,
+  'git-working-tree': defineGitWorkingTreeSteps,
+  'git-commit-graph': defineGitCommitGraphSteps,
+  'git-pane-safety': defineGitPaneSafetySteps,
+  'sidecar-hotkeys': defineSidecarHotkeysSteps,
 };

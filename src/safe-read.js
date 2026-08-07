@@ -44,6 +44,22 @@ const DEFAULT_MAX_BYTES = 256 * 1024;
  * @returns {string|null}
  */
 function readTextCapped(file, maxBytes = DEFAULT_MAX_BYTES) {
+  const buf = readBytesCapped(file, maxBytes);
+  return buf === null ? null : buf.toString('utf8');
+}
+
+/**
+ * The binary form of the same rule, for files that are not text: the git pane
+ * reads `.git/index`, object files and packfiles, none of which survive a
+ * UTF-8 round trip. Identical guards — lstat first (regular file only, so a
+ * fifo never blocks and a symlink is never followed), size re-checked from the
+ * open descriptor, capped read, never throws.
+ *
+ * @param {string} file
+ * @param {number} [maxBytes]
+ * @returns {Buffer|null}
+ */
+function readBytesCapped(file, maxBytes = DEFAULT_MAX_BYTES) {
   let st;
   try { st = fs.lstatSync(file); } catch { return null; }
   if (!st.isFile() || st.size > maxBytes) return null;
@@ -55,7 +71,7 @@ function readTextCapped(file, maxBytes = DEFAULT_MAX_BYTES) {
     if (!fst.isFile() || fst.size > maxBytes) return null;
     const buf = Buffer.alloc(Math.min(fst.size, maxBytes));
     const read = fs.readSync(fd, buf, 0, buf.length, 0);
-    return buf.subarray(0, read).toString('utf8');
+    return buf.subarray(0, read);
   } catch {
     return null;
   } finally {
@@ -63,4 +79,4 @@ function readTextCapped(file, maxBytes = DEFAULT_MAX_BYTES) {
   }
 }
 
-module.exports = { readTextCapped, DEFAULT_MAX_BYTES };
+module.exports = { readTextCapped, readBytesCapped, DEFAULT_MAX_BYTES };

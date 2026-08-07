@@ -42,7 +42,14 @@ chmod +x "$REPO/sidecar/ccr-statusline" 2>/dev/null || true
 
 # Prefer the newest nvm-installed node; `sort -V` is a GNU-ism, so suppress its
 # error on BSD/macOS and fall back to PATH node below.
-NODE="$(ls -d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort -V 2>/dev/null | tail -1)"
+#
+# The `|| true` is load-bearing, not defensive habit: with `set -e` and
+# `pipefail`, `ls` failing on a machine with no ~/.nvm makes the whole pipeline
+# non-zero, and a failing command substitution in an assignment aborts the
+# script. That killed the launcher outright — exit 2, no message, no sidebar —
+# for exactly the user who has plain Claude Code and no nvm, who then never
+# reaches the PATH fallback two lines below. Reproduced 2026-08-04.
+NODE="$(ls -d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort -V 2>/dev/null | tail -1 || true)"
 [ -x "$NODE" ] || NODE="$(command -v node || true)"
 [ -n "$NODE" ] || { echo "ccr: node not found" >&2; exit 1; }
 command -v tmux >/dev/null 2>&1 || { echo "ccr: tmux not found (required for the sidebar)" >&2; exit 1; }
@@ -55,13 +62,15 @@ if [ -n "$PROFILE" ]; then
     exit 1
   fi
   CC_CMD="ccs $PROFILE"
-  SESSION="${CCR_SESSION:-ccr-$PROFILE}"
-  STATE="${CCR_STATE_DIR:-$HOME/.ccr/$PROFILE}"
 else
   CC_CMD="${CC_BIN:-claude}"
-  SESSION="${CCR_SESSION:-ccr}"
-  STATE="${CCR_STATE_DIR:-$HOME/.ccr}"
 fi
+# The launcher normally arrives with CCR_SESSION/CCR_STATE_DIR already set by
+# the slot allocator (bin/ccr.js — every launch slots, profiled or bare). The
+# fallbacks cover only a direct invocation of this script, and they point at
+# slot 1's member dir: ~/.ccr itself is a container now, never a state dir.
+SESSION="${CCR_SESSION:-ccr}"
+STATE="${CCR_STATE_DIR:-$HOME/.ccr/instances/1}"
 
 # Every instance gets its OWN tmux server, on a socket named after the session
 # (-L puts it under /tmp/tmux-$UID/). On a shared server, one server death —
@@ -76,6 +85,17 @@ SOCKET="$SESSION"
 mkdir -p "$STATE"
 chmod 700 "$HOME/.ccr" "$STATE" 2>/dev/null || true
 rm -f "$STATE/exited"
+# The directory ccr was launched in — the tab's stable identity for the git
+# pane (src/state-dir.js: recordLaunchDir does the same for the other two
+# launchers). Best-effort: a tab that cannot record it falls back to naming
+# only the repo the session is in.
+# The rm is load-bearing, not tidiness: `>` on a planted FIFO blocks until a
+# reader appears and hangs the launcher here, before Claude is ever spawned, and
+# on a planted symlink it overwrites the link's target. Removing first turns both
+# into an ordinary create. src/state-dir.js does the same for the other two
+# launchers, and both sibling writers in <stateDir> already guard this way.
+rm -f "$STATE/launch-cwd" 2>/dev/null || true
+printf '%s\n' "$PWD" > "$STATE/launch-cwd" 2>/dev/null || true
 
 SETTINGS='{"statusLine":{"type":"command","command":"'"$REPO/sidecar/ccr-statusline"'"}}'
 
@@ -104,6 +124,15 @@ ENV_PREAMBLE="export CCR_STATE_DIR='$STATE_Q'"
 CLAUDE_PANE="$(tmux -L "$SOCKET" new-session -d -P -F '#{pane_id}' -s "$SESSION" \
   "$ENV_PREAMBLE; $CC_CMD --settings '$SETTINGS'; touch '$STATE_Q/exited'; sleep 2; tmux -L '$SOCKET_Q' kill-session -t '$SESSION_Q' 2>/dev/null")"
 tmux -L "$SOCKET" set-environment -t "$SESSION" CCR_STATE_DIR "$STATE"
+
+# The tab's ADDRESS: composed once by the launcher (CCR_TITLE = "[profile / ]name",
+# both halves allow-listed), never retitled mid-session. set-titles-string is a
+# literal — deliberately NOT a tmux format that would follow the session; the
+# pane and the status line are the surfaces honest about movement.
+if [ -n "${CCR_TITLE:-}" ]; then
+  tmux -L "$SOCKET" set-option -t "$SESSION" set-titles on
+  tmux -L "$SOCKET" set-option -t "$SESSION" set-titles-string "$CCR_TITLE"
+fi
 
 # Pane 1: the live economy sidebar. Capture its pane id so we can scope a hook to it.
 SIDEBAR_PANE="$(tmux -L "$SOCKET" split-window -t "$SESSION:0" -h -p "${CCR_SIDEBAR_PCT:-34}" -P -F '#{pane_id}' \

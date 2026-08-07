@@ -49,8 +49,8 @@ module.exports = function defineWindowsLauncherSteps(reg) {
     assert.match(p.pane1, /sidecar/);
     assert.strictEqual(p.frac, '0.34');
   });
-  reg.define(/^both panes receive CCR_STATE_DIR pointing at "~\/\.ccr"$/, (w) => {
-    const expected = path.join(w.home || '/home/me', '.ccr');
+  reg.define(/^both panes receive CCR_STATE_DIR pointing at "~\/\.ccr\/instances\/1"$/, (w) => {
+    const expected = path.join(w.home || '/home/me', '.ccr', 'instances', '1');
     const p = panes(w.args);
     for (const pane of [p.pane0, p.pane1]) assert.ok(pane.includes(`set "CCR_STATE_DIR=${expected}"`), pane);
   });
@@ -63,14 +63,11 @@ module.exports = function defineWindowsLauncherSteps(reg) {
   reg.define(/^the left pane runs Claude Code via `ccs c1 --settings <temp-file>`$/, (w) => {
     assert.match(panes(w.args).pane0, /ccs c1 --settings "/);
   });
-  reg.define(/^both panes receive CCR_STATE_DIR pointing at "~\/\.ccr\/c1"$/, (w) => {
-    const expected = path.join(w.home || '/home/me', '.ccr', 'c1');
-    const p = panes(w.args);
-    for (const pane of [p.pane0, p.pane1]) assert.ok(pane.includes(`set "CCR_STATE_DIR=${expected}"`), pane);
-  });
-  reg.define(/^the tmux-equivalent session name is "ccr-c1"$/, (w) => {
+  reg.define(/^the profile launch slots like a bare one, session "ccr"$/, (w) => {
+    // The sanctioned rename (profiles-removal ruling): no per-profile session
+    // names anywhere — a profile launch rides its slot's session like any other.
     const st = launchWin.resolveProfileState('c1', { env: w.env || {}, home: w.home || '/home/me' });
-    assert.strictEqual(st.session, 'ccr-c1');
+    assert.strictEqual(st.session, 'ccr');
   });
 
   // Then — error paths

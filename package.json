@@ -1,6 +1,6 @@
 {
   "name": "claude-code-runrate",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Claude Code run-rate — subscription burn-rate & economy for your Claude Code sessions.",
   "license": "MIT",
   "author": "Bing Ho <reps-attic-riot@duck.com>",
@@ -30,7 +30,9 @@
   "scripts": {
     "test": "node --test",
     "typecheck": "tsc --noEmit -p jsconfig.json",
-    "lint": "oxlint"
+    "lint": "oxlint",
+    "release-gate": "node scripts/release-gate.js",
+    "prepublishOnly": "npm run release-gate && npm run lint && npm run typecheck && npm test"
   },
   "keywords": [
     "claude-code",

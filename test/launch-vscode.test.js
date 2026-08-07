@@ -6,6 +6,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
+const path = require('node:path');
 const {
   splitKeybinding,
   sidecarPasteCommand,
@@ -23,14 +24,17 @@ test('splitKeybinding: platform-aware split shortcut', () => {
   assert.strictEqual(splitKeybinding('linux'), 'Ctrl+Shift+5');
 });
 
+// `--keys` rides along from 2026-08-05: this host binds no key of its own, and
+// its split leaves both panes running a foreground process, so the pasted line
+// is the only place a cycle key can come from (docs/PANE-CONTRACT.md, ruling log).
 test('sidecarPasteCommand: prefers `ccr` on PATH, carries the state dir by arg', () => {
   const cmd = sidecarPasteCommand({ stateDir: 'C:\\Users\\me\\.ccr', ccrBin: 'C:\\ccr.cmd', node: 'N', ccrJs: 'J' });
-  assert.strictEqual(cmd, 'ccr sidecar --state-dir "C:\\Users\\me\\.ccr"');
+  assert.strictEqual(cmd, 'ccr sidecar --state-dir "C:\\Users\\me\\.ccr" --keys');
 });
 
 test('sidecarPasteCommand: falls back to node + ccr.js by path when ccr is absent', () => {
   const cmd = sidecarPasteCommand({ stateDir: '/home/me/.ccr', ccrBin: null, node: '/usr/bin/node', ccrJs: '/repo/bin/ccr.js' });
-  assert.strictEqual(cmd, '"/usr/bin/node" "/repo/bin/ccr.js" sidecar --state-dir "/home/me/.ccr"');
+  assert.strictEqual(cmd, '"/usr/bin/node" "/repo/bin/ccr.js" sidecar --state-dir "/home/me/.ccr" --keys');
 });
 
 test('sidecarPasteCommand: hint form omits the state dir', () => {
@@ -141,6 +145,8 @@ function harness(over = {}) {
     err: '',
     /** @type {{ bin: string, args: string[] }|null} */
     spawnedClaude: null,
+    /** @type {Record<string, string>|undefined} */
+    spawnedClaudeEnv: undefined,
     /** @type {{ cmd: string, input: string }[]} */
     copied: [],
     droppedExited: 0,
@@ -163,15 +169,75 @@ function harness(over = {}) {
     existsDir: () => over.existsProfile !== false,
     listDir: () => ['c1', 'c2'],
     ensureDir: () => {},
+    // Real allocation touches the filesystem; stub slot 1 under the instances
+    // container — EVERY launch slots now (features/instance-slots.feature owns
+    // the allocation behaviour; the slot-wiring tests below override this).
+    allocateSlot: () => ({ slot: 1, session: 'ccr', stateDir: path.join('/home/me', '.ccr', 'instances', '1'), attached: false }),
+    retireInstance: () => {},
+    prepareInstance: () => ({ name: 'stub', title: 'stub' }),
     removeExited: () => {},
     dropExited: () => { w.droppedExited++; },
     writeSettings: (s) => { w.settings = s; return 'C:\\Temp\\ccr-settings-x.json'; },
     cleanup: (f) => { w.cleaned.push(f); },
-    spawnClaude: (bin, args) => { w.spawnedClaude = { bin, args }; return { status: 0 }; },
+    spawnClaude: (bin, args, extraEnv) => { w.spawnedClaude = { bin, args }; w.spawnedClaudeEnv = extraEnv; return { status: 0 }; },
     spawnCopy: (cmd, args, input) => { w.copied.push({ cmd, input }); return { status: 0 }; },
   };
   return { w, deps: { ...base, ...over.deps } };
 }
+
+test('run: an allocated instance slot reaches the paste one-liner and Claude', () => {
+  // In VS Code the sidecar is started by hand from the copied command, so the
+  // slot has to reach the user THROUGH that string — and the Claude process
+  // needs the same dir in its env or its status line writes to the wrong slot.
+  const slot2 = '/home/me/.ccr/2';
+  const { w, deps } = harness({
+    deps: { allocateSlot: () => ({ slot: 2, session: 'ccr-2', stateDir: slot2, attached: false }) },
+  });
+  assert.strictEqual(run(undefined, deps), 0);
+  assert.match(w.out, /--state-dir "\/home\/me\/\.ccr\/2"/, 'paste command targets the slot');
+  assert.deepStrictEqual(w.spawnedClaudeEnv, { CCR_STATE_DIR: slot2 });
+});
+
+test('run: reusing an attached slot skips the split banner', () => {
+  // The launcher must take this verdict from the allocator, which inspected the
+  // slot BEFORE reserving it. Asking the heartbeat again here would be asking
+  // about a slot we already chose — and re-prompting the split on every relaunch
+  // is exactly what used to pile up duplicate sidebar panes.
+  const { w, deps } = harness({
+    deps: {
+      allocateSlot: () => ({ slot: 1, session: 'ccr', stateDir: '/home/me/.ccr', attached: true }),
+      sidecarAlive: () => { throw new Error('must not re-ask the heartbeat for an allocated slot'); },
+    },
+  });
+  assert.strictEqual(run(undefined, deps), 0);
+  assert.match(w.out, /already attached/, 'the short note, not the banner');
+  assert.doesNotMatch(w.out, /Split this terminal/);
+});
+
+test('run: a launch with no slot still asks the heartbeat directly', () => {
+  // Named profiles and explicit overrides get no slot, so the original signal
+  // has to keep working for them.
+  const { w, deps } = harness({
+    deps: { allocateSlot: () => null, sidecarAlive: () => true },
+  });
+  assert.strictEqual(run(undefined, deps), 0);
+  assert.match(w.out, /already attached/);
+});
+
+test('run: the instance is retired once Claude exits', () => {
+  // Ephemeral instances: retirement deletes the dir unless a sidebar is still
+  // attached (src/instance-slot.js retireInstance owns that fork).
+  /** @type {string[]} */
+  const retired = [];
+  const { deps } = harness({
+    deps: {
+      allocateSlot: () => ({ slot: 2, session: 'ccr-2', stateDir: '/home/me/.ccr/instances/2', attached: false }),
+      retireInstance: (/** @type {string} */ d) => retired.push(d),
+    },
+  });
+  run(undefined, deps);
+  assert.deepStrictEqual(retired, ['/home/me/.ccr/instances/2']);
+});
 
 test('run: wires the banner, clipboard, Claude, and the exit sentinel', () => {
   const { w, deps } = harness();
@@ -218,7 +284,7 @@ test('run: a profile runs `ccs <profile>` against the profile state dir', () => 
   assert.ok(w.spawnedClaude, 'ccs was spawned');
   assert.strictEqual(w.spawnedClaude.bin, 'ccs');
   assert.deepStrictEqual(w.spawnedClaude.args, ['c1', '--settings', 'C:\\Temp\\ccr-settings-x.json']);
-  assert.match(w.out, /ccr sidecar --state-dir ".*\.ccr.c1"/, 'sidecar one-liner targets the profile state dir');
+  assert.match(w.out, /ccr sidecar --state-dir ".*\.ccr.instances.1"/, 'sidecar one-liner targets the slot state dir');
 });
 
 test('run: unknown profile errors with the available list and no spawn', () => {

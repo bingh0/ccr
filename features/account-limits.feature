@@ -1,15 +1,23 @@
-# Acceptance criteria for cross-profile meter reconciliation — the "the sidecars
+# Acceptance criteria for cross-instance meter reconciliation — the "the sidecars
 # don't agree on 5h/weekly" bug.
 #
-# The 5h and weekly walls are ONE account-wide resource, but each ccr profile
-# (cq/cw/ce/cr, …) only captures them when its own Claude session renders the
-# status line. An idle profile's panel therefore lags a busy one. We reconcile the
-# meters across sibling profiles ON THE SAME ACCOUNT so their sidecars agree — and,
-# because the snapshot has no account id, we guard against ever mixing DIFFERENT
-# accounts by matching the account-wide buckets' reset instants exactly.
+# The 5h and weekly walls are ONE account-wide resource, but each ccr instance
+# only captures them when its own Claude session renders the status line. An idle
+# instance's panel therefore lags a busy one. We reconcile the meters across
+# siblings ON THE SAME ACCOUNT so their sidecars agree — and, because the snapshot
+# has no account id, we guard against ever mixing DIFFERENT accounts by matching
+# the account-wide buckets' reset instants exactly.
+#
+# "Sibling" means any other instance under ~/.ccr: a CCS profile (~/.ccr/cq) or an
+# automatically assigned slot (~/.ccr/2). Slot 1 IS ~/.ccr, so it is its own root
+# rather than a child of one — that asymmetry made it the single instance that
+# never caught up, and features/instance-slots.feature pins the fix.
+#
+# The scenarios below drive the pure merge; the disk layer that feeds it
+# (which directories count as siblings) belongs to instance-slots.
 
-Feature: Account-wide meters agree across profiles
-  As a user running several ccr profiles side-by-side on one account
+Feature: Account-wide meters agree across instances
+  As a user running several ccr instances side-by-side on one account
   I want every sidecar's 5h/weekly meters to show the freshest shared numbers
   So that two panels don't disagree just because one session has been idle
 

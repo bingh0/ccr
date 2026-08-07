@@ -18,7 +18,8 @@ const path = require('node:path');
 const os = require('node:os');
 const launchWin = require('./launch-win');
 const inject = require('./settings-inject');
-const { ensureSecureDir } = require('./state-dir');
+const slots = require('./instance-slot');
+const { ensureSecureDir, recordLaunchDir } = require('./state-dir');
 
 /**
  * VS Code's "Split Terminal" default keybinding, per platform.
@@ -33,12 +34,20 @@ function splitKeybinding(platform) {
  * The command the user runs in the split pane. Carries the resolved state dir as
  * an explicit arg (shell-agnostic: no per-shell `set`/`$env:`/`export` needed).
  * Prefers the `ccr` binary when on PATH; falls back to node + ccr.js by path.
+ *
+ * `--keys` rides along because THIS host binds no key. Under tmux the launcher
+ * binds F3 and tmux runs `ccr cycle-view`; VS Code offers no equivalent, and its
+ * split leaves both panes running a foreground process, so there is not even a
+ * shell prompt free to type the command into. `--keys` makes the pasted process
+ * the hotkey host and runs the panel as its child — the renderer still reads no
+ * input (src/sidecar-keys.js).
+ *
  * @param {{ stateDir: string, ccrBin?: string|null, node: string, ccrJs: string, hint?: boolean }} o
  * @returns {string}
  */
 function sidecarPasteCommand(o) {
   const head = o.ccrBin ? 'ccr' : `"${o.node}" "${o.ccrJs}"`;
-  const tail = o.hint ? ' --hint' : ` --state-dir "${o.stateDir}"`;
+  const tail = o.hint ? ' --hint' : ` --state-dir "${o.stateDir}" --keys`;
   return `${head} sidecar${tail}`;
 }
 
@@ -70,6 +79,10 @@ function buildBanner(o) {
     `  ${c('1;96', '2.')} In the new pane, run ${c('2', '(already on your clipboard — just paste)')}:`,
     '',
     `       ${c('1;92', o.sidecarCmd)}`,
+    '',
+    // The key is named here because this host binds none of its own: nothing
+    // else on screen would tell the user the second view exists.
+    c('2', '  Then click that pane and press ') + c('1;97', 'Space') + c('2', ' (or ') + c('1;97', 'F3') + c('2', ') to cycle its views.'),
     '',
     c('2', `  Claude is starting in THIS pane. Lost these steps? Run:  ${o.hintCmd}`),
     '',
@@ -116,9 +129,10 @@ function buildAttachedNote(o) {
  * sidecar, then run Claude in the current pane. Returns Claude's exit code.
  * @param {string} [profile]
  * @param {Partial<Deps>} [deps]
+ * @param {{ name?: string|null }} [opts]  explicit --name, already validated
  * @returns {number}
  */
-function run(profile, deps = {}) {
+function run(profile, deps = {}, opts = {}) {
   const d = withDefaults(deps);
 
   if (profile !== undefined && !launchWin.validateProfile(profile)) {
@@ -126,7 +140,20 @@ function run(profile, deps = {}) {
     return 1;
   }
 
-  const st = launchWin.resolveProfileState(profile, { env: d.env, home: d.home });
+  // Every launch claims a free instance slot first, so a second VS Code window
+  // never shares another's state dir (src/instance-slot.js). A slot is only
+  // busy while a LIVE session holds it — an attached-but-idle sidebar (the note
+  // below) leaves its slot reusable, so relaunching here still lands on the same
+  // state dir and that pane picks the new session up, exactly as before.
+  const slot = d.allocateSlot({ profile, env: d.env, home: d.home });
+  if (slot && 'exhausted' in slot) {
+    d.err(`ccr: every slot is in use (${slots.MAX_SLOTS} live instances) — close one first\n`);
+    return 1;
+  }
+  // The instance's name and profile record — same on every platform. (The
+  // editor owns its tab titles, so there is no title surface here.)
+  if (slot && !('exhausted' in slot)) d.prepareInstance(slot, { profile, name: opts.name });
+  const st = launchWin.resolveProfileState(profile, { env: slots.applySlotEnv(d.env, slot), home: d.home });
   if (st.usesCcs) {
     if (!d.which('ccs')) {
       d.err("ccr: 'ccs' not found on PATH — pass a profile only if CCS is installed.\n");
@@ -143,6 +170,9 @@ function run(profile, deps = {}) {
   }
 
   try { d.ensureDir(st.stateDir); } catch { /* best effort */ }
+  // The tab's stable identity for the git pane. Recorded here because only the
+  // launcher knows where ccr was started (src/state-dir.js).
+  try { d.recordLaunchDir(st.stateDir, process.cwd()); } catch { /* best effort */ }
   d.removeExited(st.stateDir);
 
   // statusLine via a per-launch temp settings file (no ~/.claude mutation).
@@ -157,7 +187,13 @@ function run(profile, deps = {}) {
   const ccrBin = d.which('ccr');
   const sidecarCmd = sidecarPasteCommand({ stateDir: st.stateDir, ccrBin, node: d.node, ccrJs: d.ccrJs });
   const hintCmd = sidecarPasteCommand({ stateDir: st.stateDir, ccrBin, node: d.node, ccrJs: d.ccrJs, hint: true });
-  if (d.sidecarAlive(st.stateDir)) {
+  // "Already attached?" comes from the allocator when it chose this slot: it
+  // inspected the heartbeat BEFORE reserving, and reserving a free slot writes a
+  // placeholder heartbeat of our own — so re-reading it here would see our own
+  // write and wrongly skip the split banner. Only a launch with no slot (a named
+  // profile, an explicit override) asks the heartbeat directly.
+  const attached = slot && !('exhausted' in slot) ? slot.attached : d.sidecarAlive(st.stateDir);
+  if (attached) {
     d.out(buildAttachedNote({ hintCmd, color: d.color }));
   } else {
     d.out(buildBanner({ sidecarCmd, splitKey: splitKeybinding(d.platform), hintCmd, color: d.color }));
@@ -175,8 +211,19 @@ function run(profile, deps = {}) {
   const parts = st.ccCmd.split(' ');
   const r = d.spawnClaude(parts[0], [...parts.slice(1), '--settings', settingsFile], { CCR_STATE_DIR: st.stateDir });
   d.cleanup(settingsFile);
-  if (r && r.error) { d.err(`ccr: failed to launch Claude: ${r.error.message}\n`); return 1; }
+  if (r && r.error) {
+    // A failed spawn must NOT flip the sidecar to "ended" or delete anything;
+    // just hand the reservation back.
+    if (slot && !('exhausted' in slot)) d.releaseSlot(slot.stateDir);
+    d.err(`ccr: failed to launch Claude: ${r.error.message}\n`);
+    return 1;
+  }
+  // Session over: drop the sentinel FIRST (an attached sidebar reads it to show
+  // "session ended" and wait for reuse), then retire the instance — ephemeral,
+  // so the dir is deleted unless that sidebar is still attached, in which case
+  // only the reservation is released and a later sweep collects the dir.
   d.dropExited(st.stateDir);
+  if (slot && !('exhausted' in slot)) d.retireInstance(slot.stateDir);
   return r && typeof r.status === 'number' ? r.status : 0;
 }
 
@@ -283,6 +330,13 @@ function withDefaults(deps) {
     existsDir: deps.existsDir || ((dir) => { try { return require('node:fs').statSync(dir).isDirectory(); } catch { return false; } }),
     listDir: deps.listDir || ((dir) => { try { return require('node:fs').readdirSync(dir); } catch { return []; } }),
     ensureDir: deps.ensureDir || ensureSecureDir,
+    recordLaunchDir: deps.recordLaunchDir || recordLaunchDir,
+    allocateSlot: deps.allocateSlot || ((o) => slots.allocateSlot(o)),
+    releaseSlot: deps.releaseSlot || ((dir) => slots.releaseSlot(dir)),
+    retireInstance: deps.retireInstance || ((dir) => slots.retireInstance(dir)),
+    prepareInstance: deps.prepareInstance
+      || ((/** @type {{slot:number,stateDir:string}} */ s, /** @type {any} */ o) =>
+        require('./instance-name').prepareInstance(s, { ...o, home: deps.home || os.homedir() })),
     removeExited: deps.removeExited || ((dir) => { try { require('node:fs').rmSync(path.join(dir, 'exited'), { force: true }); } catch { /* best effort */ } }),
     dropExited: deps.dropExited || ((dir) => { try { require('node:fs').writeFileSync(path.join(dir, 'exited'), ''); } catch { /* best effort */ } }),
     writeSettings: deps.writeSettings || ((s) => inject.writeSettingsFile(s)),
@@ -309,6 +363,11 @@ function withDefaults(deps) {
  * @property {(dir: string) => boolean} existsDir
  * @property {(dir: string) => string[]} listDir
  * @property {(dir: string) => void} ensureDir
+ * @property {(dir: string, cwd: string) => void} recordLaunchDir
+ * @property {(o: {profile?: string, env: NodeJS.ProcessEnv, home: string}) => ({slot: number, session: string, stateDir: string, attached: boolean}|{exhausted: true}|null)} allocateSlot
+ * @property {(dir: string) => void} releaseSlot
+ * @property {(dir: string) => void} retireInstance
+ * @property {(slot: {slot: number, stateDir: string}, o: {profile?: string, name?: string|null}) => {name: string, title: string}} prepareInstance
  * @property {(dir: string) => void} removeExited
  * @property {(dir: string) => void} dropExited
  * @property {(settings: object) => string} writeSettings

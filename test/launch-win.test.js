@@ -36,16 +36,17 @@ test('resolveProfileState: plain claude defaults', () => {
   const r = resolveProfileState(undefined, { env: {}, home: '/home/me' });
   assert.strictEqual(r.ccCmd, 'claude');
   assert.strictEqual(r.session, 'ccr');
-  assert.strictEqual(r.stateDir, path.join('/home/me', '.ccr'));
+  assert.strictEqual(r.stateDir, path.join('/home/me', '.ccr', 'instances', '1'), 'fallback is a member dir, never the container');
   assert.strictEqual(r.instanceDir, null);
   assert.strictEqual(r.usesCcs, false);
 });
 
-test('resolveProfileState: profile targets CCS state dir and instance dir (@AC6)', () => {
+test('resolveProfileState: a profile is a launch parameter, not a namespace (@AC6)', () => {
+  // The profiles-removal ruling: no per-profile session or state dir anywhere.
   const r = resolveProfileState('c1', { env: {}, home: '/home/me' });
   assert.strictEqual(r.ccCmd, 'ccs c1');
-  assert.strictEqual(r.session, 'ccr-c1');
-  assert.strictEqual(r.stateDir, path.join('/home/me', '.ccr', 'c1'));
+  assert.strictEqual(r.session, 'ccr');
+  assert.strictEqual(r.stateDir, path.join('/home/me', '.ccr', 'instances', '1'));
   assert.strictEqual(r.instanceDir, path.join('/home/me', '.ccs', 'instances', 'c1'));
   assert.strictEqual(r.usesCcs, true);
 });
