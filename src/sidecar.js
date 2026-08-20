@@ -204,7 +204,15 @@ function sessionDir(stateDir) {
 /**
  * The directory ccr was LAUNCHED in — the tab's stable identity. Written by the
  * launcher (src/state-dir.js: recordLaunchDir); the sidecar's own cwd is the
- * fallback, which is right under tmux and wt.exe where the pane inherits it.
+ * fallback.
+ *
+ * That fallback is right under tmux, where `new-session` inherits the caller's
+ * cwd. It is NOT free under wt.exe: a pane opens in the Windows Terminal
+ * profile's own startingDirectory unless the launcher passes `-d`, which it
+ * now does (src/launch-win.js: buildWtArgs). This comment previously claimed
+ * wt.exe inherited it, and that claim was the only place the assumption
+ * surfaced anywhere in the codebase — see features/windows-launcher.feature,
+ * "Claude Code opens in the directory ccr was launched from".
  *
  * `process.cwd()` throws when the directory it names has been deleted, which is
  * not hypothetical here: it is the "repository is deleted while the pane is

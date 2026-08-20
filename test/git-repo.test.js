@@ -280,9 +280,21 @@ test('every launcher records the launch directory', () => {
   assert.match(shCode, /launch-cwd/, 'the tmux launcher records it');
   assert.match(shCode, /rm -f "\$STATE\/launch-cwd"/,
     'and clears the path first, so a fifo cannot hang the launcher here either');
-  for (const f of ['launch-win.js', 'launch-vscode.js']) {
+  // The two native launchers reach the cwd differently, and the difference is
+  // load-bearing. launch-win.js takes it through the injected Deps (d.cwd)
+  // because it has a SECOND consumer: wt.exe's `-d`, which is what actually
+  // opens the panes in the right place. One source for both means the record
+  // and the pane can never disagree about where the session is (see
+  // features/windows-launcher.feature, "Claude Code opens in the directory ccr
+  // was launched from"). launch-vscode.js reads process.cwd() directly — its
+  // host inherits the cwd, so there is nothing to keep in step.
+  const expected = {
+    'launch-win.js': /d\.recordLaunchDir\(st\.stateDir, d\.cwd\)/,
+    'launch-vscode.js': /d\.recordLaunchDir\(st\.stateDir, process\.cwd\(\)\)/,
+  };
+  for (const [f, re] of Object.entries(expected)) {
     const src = fs.readFileSync(path.join(root, 'src', f), 'utf8');
-    assert.match(src, /d\.recordLaunchDir\(st\.stateDir, process\.cwd\(\)\)/, `${f} records it`);
+    assert.match(src, re, `${f} records it`);
   }
 });
 

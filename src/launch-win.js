@@ -39,6 +39,34 @@ function isWtArgSafe(value) {
   return !WT_UNSAFE_RE.test(String(value));
 }
 
+// The starting directory is a DIFFERENT problem from the values above, and
+// reusing WT_UNSAFE_RE for it would be a bug in both directions.
+//
+//   `%` is LEGAL in a Windows path (C:\100%done) and harmless here: -d's value
+//   is its own argv token handed to wt, never interpolated into a cmd /c
+//   payload, so cmd's variable expansion never sees it. WT_UNSAFE_RE rejects
+//   `%`, so reusing it would refuse a perfectly valid directory.
+//
+//   `;` is legal in a Windows path AND is wt's own command separator — wt
+//   re-parses its command line, and Node only quotes an argv token that
+//   contains whitespace, so `C:\my;dir` would arrive unquoted and split the
+//   command. WT_UNSAFE_RE does NOT reject `;`, so it misses the one character
+//   that actually matters here.
+//
+// A directory that fails this does not fail the launch: run() drops -d and
+// says where the panes landed (features/windows-launcher.feature, "A launch
+// directory Windows Terminal cannot be given still launches"). Refusing to
+// start over a legal directory name would trade one broken launch for another.
+const WT_PATH_UNSAFE_RE = /["`;\r\n]/;
+
+/**
+ * @param {string|null|undefined} dir
+ * @returns {boolean} true if `dir` can be passed to wt.exe as `-d <dir>`
+ */
+function isWtPathSafe(dir) {
+  return typeof dir === 'string' && dir.length > 0 && !WT_PATH_UNSAFE_RE.test(dir);
+}
+
 // Upstream default split: the sidecar gets ~34% of the width.
 const DEFAULT_SIDEBAR_PCT = 34;
 
@@ -181,9 +209,16 @@ function sidecarCols(termCols, fracNum, splitFlag) {
  * the case of %, hijack) the cmd /c payload — see isWtArgSafe. run() catches
  * this and reports a clean error instead of spawning a broken command.
  *
+ * `cwd` is the directory BOTH panes start in. Windows Terminal does not
+ * inherit it the way `tmux new-session` does: without `-d` a pane opens in the
+ * WT profile's own `startingDirectory`, which defaults to %USERPROFILE% — so
+ * omitting it silently moved Claude Code out of the user's project. Absent or
+ * unpassable (see isWtPathSafe), `-d` is left off entirely and the panes fall
+ * back to that profile default; run() is what tells the user.
+ *
  * @param {{ ccCmd: string, settingsFile: string, stateDir: string,
  *   node: string, ccrJs: string, sidebarPct?: number, sidebarSide?: string,
- *   termCols?: number, title?: string }} o
+ *   termCols?: number, title?: string, cwd?: string|null }} o
  * @returns {string[]}
  */
 function buildWtArgs(o) {
@@ -230,10 +265,14 @@ function buildWtArgs(o) {
     `"${node}" "${ccrJs}" sidecar --exit-on-end`;
   const pane1 = paneCommand(stateDir, sidecarBody);
 
+  // Both panes get the same starting directory, or neither does. `-d` sits
+  // with the other options, before each pane's `cmd` payload.
+  const startIn = isWtPathSafe(o.cwd) ? ['-d', String(o.cwd)] : [];
+
   return [
-    '-w', '0', 'new-tab', '--title', title, 'cmd', '/c', pane0,
+    '-w', '0', 'new-tab', '--title', title, ...startIn, 'cmd', '/c', pane0,
     ';',
-    'split-pane', splitFlag, '-s', frac, 'cmd', '/c', pane1,
+    'split-pane', splitFlag, '-s', frac, ...startIn, 'cmd', '/c', pane1,
   ];
 }
 
@@ -282,6 +321,13 @@ function withDefaults(deps) {
     // The launcher's own stdout reports the live terminal width — the sidecar's
     // does not, inside its cmd /c pane (see sidecarCols). undefined on non-TTY.
     cols: deps.cols != null ? deps.cols : process.stdout.columns,
+    // The launch directory, injected like every other external effect. It
+    // feeds BOTH the recorded launch dir (the tab's identity for the git pane)
+    // and wt's `-d`, so the pane and the record can never disagree about where
+    // this session is. process.cwd() throws only if the cwd has been deleted.
+    cwd: deps.cwd != null ? deps.cwd : (() => {
+      try { return process.cwd(); } catch { return null; }
+    })(),
     node: deps.node || process.execPath,
     ccrJs: deps.ccrJs || path.join(__dirname, '..', 'bin', 'ccr.js'),
     out: deps.out || ((s) => { process.stdout.write(s); }),
@@ -411,8 +457,18 @@ function run(profile, deps = {}, opts = {}) {
   try { d.ensureDir(st.stateDir); } catch { /* best effort */ }
   // The tab's stable identity for the git pane. Recorded here because only the
   // launcher knows where ccr was started (src/state-dir.js).
-  try { d.recordLaunchDir(st.stateDir, process.cwd()); } catch { /* best effort */ }
+  if (d.cwd) try { d.recordLaunchDir(st.stateDir, d.cwd); } catch { /* best effort */ }
   d.removeExited(st.stateDir);
+
+  // The panes must open where `ccr` was run. wt does not inherit that, so it
+  // is passed explicitly below; when the directory cannot be passed the launch
+  // still goes ahead, and saying so is the whole difference between a surprise
+  // and a known limitation.
+  if (d.cwd && !isWtPathSafe(d.cwd)) {
+    d.err(`ccr: cannot open the panes in ${d.cwd}\n`);
+    d.err('     the path contains a character Windows Terminal parses (" or ;)\n');
+    d.err("     — they will open in Windows Terminal's default directory instead.\n");
+  }
 
   // 5. Inject statusLine via a temp settings FILE (avoids CLI JSON quoting).
   const command = inject.buildStatusLineCommandInline({ node: d.node, ccrJs: d.ccrJs });
@@ -432,6 +488,7 @@ function run(profile, deps = {}, opts = {}) {
       sidebarSide: d.env.CCR_SIDEBAR_SIDE || DEFAULT_SIDEBAR_SIDE,
       termCols: d.cols,
       title: inst ? inst.title : undefined,
+      cwd: d.cwd,
     });
   } catch (e) {
     d.err(`ccr: ${e instanceof Error ? e.message : String(e)}\n`);
@@ -453,6 +510,8 @@ function run(profile, deps = {}, opts = {}) {
  * @property {NodeJS.ProcessEnv} env
  * @property {string} home
  * @property {number|undefined} cols
+ * @property {string|null} cwd the directory `ccr` was run in — recorded as the
+ *   tab's launch dir AND passed to wt as the panes' starting directory
  * @property {string} node
  * @property {string} ccrJs
  * @property {(s: string) => void} out
@@ -477,6 +536,7 @@ module.exports = {
   DEFAULT_SIDEBAR_SIDE,
   validateProfile,
   isWtArgSafe,
+  isWtPathSafe,
   resolveProfileState,
   sidebarFraction,
   sidebarSplitFlag,

@@ -30,6 +30,7 @@ module.exports = function defineWindowsLauncherSteps(reg) {
   reg.define(/^the CCS profile directory "([^"]+)" exists$/, (w) => { w.existsProfile = true; });
   reg.define(/^the CCS profile directory "([^"]+)" does not exist$/, (w) => { w.existsProfile = false; });
   reg.define(/^a stale file "exited" exists in the resolved state dir$/, (w) => { w.staleExited = true; });
+  reg.define(/^ccr is run from the directory "([^"]+)"$/, (w, dir) => { w.cwd = dir; });
 
   // When
   reg.define(/^I run "ccr"$/, (w) => runLauncher(w, undefined));
@@ -54,6 +55,28 @@ module.exports = function defineWindowsLauncherSteps(reg) {
     const p = panes(w.args);
     for (const pane of [p.pane0, p.pane1]) assert.ok(pane.includes(`set "CCR_STATE_DIR=${expected}"`), pane);
   });
+  // Then — where the panes open (@AC10). Each `-d` is checked inside its OWN
+  // pane's segment of the argv: one before the ";" separator and one after it.
+  // A single -d covering only the first segment would leave the sidecar in the
+  // Windows Terminal profile's default directory.
+  reg.define(/^both panes are given the starting directory "([^"]+)"$/, (w, dir) => {
+    const sep = w.args.indexOf(';');
+    const pane0 = w.args.slice(0, sep);
+    const pane1 = w.args.slice(sep);
+    assert.strictEqual(pane0[pane0.indexOf('-d') + 1], dir, 'pane 0 starting directory');
+    assert.strictEqual(pane1[pane1.indexOf('-d') + 1], dir, 'pane 1 starting directory');
+  });
+  reg.define(/^the recorded launch directory is "([^"]+)"$/, (w, dir) => {
+    assert.ok(w.recorded, 'the launch directory was recorded');
+    assert.strictEqual(w.recorded.cwd, dir);
+  });
+  reg.define(/^no starting directory is given to Windows Terminal$/, (w) => {
+    assert.strictEqual(w.args.includes('-d'), false, 'no -d in the argv');
+  });
+  reg.define(/^stderr explains the panes open in the default directory$/, (w) => {
+    assert.match(w.err, /default directory/);
+  });
+
   reg.define(/^the process exits 0$/, (w) => assert.strictEqual(w.code, 0));
   reg.define(/^the sidecar pane is split at approximately 50% width$/, (w) => {
     assert.strictEqual(panes(w.args).frac, '0.5');
