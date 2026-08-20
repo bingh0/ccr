@@ -21,6 +21,14 @@ const { execFileSync } = require('node:child_process');
 const { composeFrame } = require('../../src/sidecar');
 const { renderPane } = require('../../src/render/pane');
 const { loadPaneBlob } = require('../../src/pane-blob');
+// features/design/test-link-fixtures.feature. Two @security scenarios in this
+// file need a fixture some platforms cannot build — a FIFO, and a symlink to a
+// file. Neither has a faithful substitute, so both DECLINE OUT LOUD: a Gherkin
+// scenario whose steps quietly no-op still reports as passing, which is how a
+// ratified security guarantee came to assert nothing here on Windows.
+const {
+  SKIP_REASON, fileSymlinksAvailable, plantFileLink, announceUnbuildable,
+} = require('../_links');
 
 const ROOT = path.join(__dirname, '..', '..');
 const GOLDEN = JSON.parse(fs.readFileSync(path.join(ROOT, 'docs', 'pane-blob.golden.json'), 'utf8'));
@@ -529,6 +537,14 @@ module.exports = function definePaneBlobsSteps(reg) {
       execFileSync('mkfifo', [w.blobPath]);
       if (!fs.lstatSync(w.blobPath).isFIFO()) w.skipFifo = true;
     } catch { w.skipFifo = true; }
+    // Declining used to be SILENT, so this @security scenario reported green
+    // on Windows while asserting nothing at all.
+    if (w.skipFifo) {
+      announceUnbuildable(
+        'pane-blobs @security: a pipe that never yields bytes',
+        'this platform has no working mkfifo (MSYS mkfifo exits 0 without creating a FIFO on NTFS)',
+      );
+    }
   });
   reg.define(/^the pane shows the cannot-read state$/, (w) => {
     if (w.skipFifo) return;
@@ -537,17 +553,27 @@ module.exports = function definePaneBlobsSteps(reg) {
   });
 
   reg.define(/^the configured path is a symlink pointing at another file$/, (w) => {
+    // A junction cannot point at a file and a hardlink INVERTS what this
+    // scenario asserts — writing through one does reach the target — so there
+    // is nothing honest to substitute. Say so where the output is read.
+    if (!fileSymlinksAvailable()) {
+      announceUnbuildable('pane-blobs @security: a symlink pointing at another file', SKIP_REASON);
+      w.skipSymlink = true;
+      return;
+    }
     const target = path.join(w.dir, 'target.json');
     fs.writeFileSync(target, JSON.stringify(GOLDEN));
     fs.rmSync(w.blobPath, { force: true });
-    fs.symlinkSync(target, w.blobPath);
+    plantFileLink(target, w.blobPath);
     w.symlinkTarget = target;
   });
   reg.define(/^the pane shows the cannot-read state naming the path$/, (w) => {
+    if (w.skipSymlink) return;
     assert.match(w.plain, /cannot read/);
     assert.ok(namesSource(w.plain, w.source), 'the configured path is named');
   });
   reg.define(/^the sidecar never opens the symlink's target$/, (w) => {
+    if (w.skipSymlink) return;
     // The target is a perfectly valid blob; if it were followed, its content
     // would render. Nothing from it may appear.
     assert.ok(!w.plain.includes('gherkin-trace'), 'the symlink was followed');

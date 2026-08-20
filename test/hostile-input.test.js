@@ -20,6 +20,10 @@ const { clampVisible } = require('../src/render/shared');
 const { readNewLines } = require('../src/transcripts');
 const { readTextCapped } = require('../src/safe-read');
 const { liveness } = require('../src/liveness');
+// A symlink to a FILE has no unprivileged Windows equivalent, so these two
+// skip by name there rather than fake the fixture — a hardlink would invert
+// the very property they assert. features/design/test-link-fixtures.feature.
+const { plantFileLink, skipWithoutFileSymlinks } = require('./_links');
 
 // A composed frame is legitimately multi-line, so newline is the one control
 // character allowed to survive into it. Everything else is a finding.
@@ -112,12 +116,12 @@ test('an oversized snapshot is refused rather than rendered', (t) => {
   assert.strictEqual(readTextCapped(p, 400 * 1024)?.length, 300 * 1024, 'under an explicit cap → read');
 });
 
-test('a symlinked snapshot is not followed', (t) => {
+test('a symlinked snapshot is not followed', { skip: skipWithoutFileSymlinks() }, (t) => {
   const d = stateDir(t);
   const target = path.join(d, 'elsewhere.json');
   fs.writeFileSync(target, '{"secret":true}');
   const link = path.join(d, 'linked.json');
-  fs.symlinkSync(target, link);
+  plantFileLink(target, link);
   assert.strictEqual(readTextCapped(link), null, 'state files are state, never links');
 });
 
@@ -218,11 +222,11 @@ test('a stale nonce cannot lock out every future sidecar after a clock step', (t
   assert.strictEqual(heartbeatTick(d, mine, { now: old + 121_000 }), 'yielded');
 });
 
-test('the heartbeat is never written through a planted symlink', (t) => {
+test('the heartbeat is never written through a planted symlink', { skip: skipWithoutFileSymlinks() }, (t) => {
   const d = stateDir(t);
   const victim = path.join(d, 'victim.txt');
   fs.writeFileSync(victim, 'ORIGINAL');
-  fs.symlinkSync(victim, path.join(d, 'sidecar-alive'));
+  plantFileLink(victim, path.join(d, 'sidecar-alive'));
   heartbeatTick(d, `${process.pid}:${Date.now()}`);
   assert.strictEqual(fs.readFileSync(victim, 'utf8'), 'ORIGINAL', 'the link target was written through');
 });

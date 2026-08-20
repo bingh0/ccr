@@ -115,6 +115,24 @@ an omission.
 The four that earn the tag: both escape-sequence scenarios, the unreadable-repo
 scenario, and the never-writes scenario.
 
+**Six link-fixture tests, and one ratified `@security` scenario, do not run on
+a Windows machine without Developer Mode.** `fs.symlinkSync` needs a privilege
+ordinary Windows users do not hold, and a symlink pointing at a FILE has no
+unprivileged equivalent there: a junction cannot target a file, and a hardlink
+inverts the property under test, since writing through one *does* reach the
+target. Substituting either would turn a real guard into a green test proving
+its own negation, so those tests are skipped by name, with a reason the reader
+can act on, and they run normally wherever the privilege exists — an elevated
+shell, Developer Mode, or a CI runner. Directory targets are unaffected: a
+junction realizes them faithfully and they run everywhere.
+
+The scenario carrying the debt is `pane-blobs.feature`'s "A symlink at the blob
+path is refused, never followed". It is recorded here rather than silently
+degraded, because a scenario whose steps quietly no-op still reports as
+passing — which is what had already happened, unnoticed, to the sibling FIFO
+scenario in the same file. Both now announce that they declined and why.
+Specified by `features/design/test-link-fixtures.feature`.
+
 ## Deferred to the design tier
 
 Anything platform-specific the build needs goes to `features/design/`, run by

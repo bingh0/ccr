@@ -17,6 +17,11 @@ const {
   defaultReserve, defaultInspect, defaultDirUsable, pidAlive,
 } = require('../src/instance-slot');
 const { HEARTBEAT_FILE } = require('../src/sidecar');
+// Link fixtures, per platform — features/design/test-link-fixtures.feature.
+// A junction stands in faithfully for a DIRECTORY target; a FILE target has no
+// unprivileged Windows equivalent, so those tests skip by name rather than
+// substitute a hardlink, which would invert the property under test.
+const { plantDirLink, plantFileLink, skipWithoutFileSymlinks } = require('./_links');
 
 // A pid that is certainly not running, so a slot recorded to it reads free.
 const DEAD_PID = 0x7ffffff0;
@@ -76,7 +81,7 @@ test('defaultReserve: never touches the sidebar heartbeat', (t) => {
   assert.strictEqual(fs.readFileSync(beat, 'utf8'), '4242:1');
 });
 
-test('defaultReserve: never writes through a symlink planted at the owner path', (t) => {
+test('defaultReserve: never writes through a symlink planted at the owner path', { skip: skipWithoutFileSymlinks() }, (t) => {
   // The state dir is writable by anything running as the user, so this path is
   // plantable. The link records no live pid, so it is treated as a dead owner
   // and UNLINKED — rmSync removes the link itself, never its target — and the
@@ -86,20 +91,20 @@ test('defaultReserve: never writes through a symlink planted at the owner path',
   const victim = path.join(dir, 'victim.txt');
   fs.writeFileSync(victim, 'original');
   const link = path.join(dir, OWNER_FILE);
-  fs.symlinkSync(victim, link);
+  plantFileLink(victim, link);
 
   assert.strictEqual(defaultReserve(dir), true);
   assert.strictEqual(fs.readFileSync(victim, 'utf8'), 'original', 'the target is untouched');
   assert.strictEqual(fs.lstatSync(link).isSymbolicLink(), false, 'the link was replaced by our own file');
 });
 
-test('defaultReserve: a planted link that names a LIVE pid declines the slot', (t) => {
+test('defaultReserve: a planted link that names a LIVE pid declines the slot', { skip: skipWithoutFileSymlinks() }, (t) => {
   // The other half: content that parses as a running owner is respected rather
   // than cleared, so a reservation can never be stolen by planting a link.
   const dir = freshDir(t);
   const victim = path.join(dir, 'victim.txt');
   fs.writeFileSync(victim, `${process.pid}:${Date.now()}`);
-  fs.symlinkSync(victim, path.join(dir, OWNER_FILE));
+  plantFileLink(victim, path.join(dir, OWNER_FILE));
 
   assert.strictEqual(defaultReserve(dir), false);
   assert.strictEqual(fs.readFileSync(victim, 'utf8').startsWith(String(process.pid)), true, 'untouched');
@@ -128,7 +133,7 @@ test('defaultDirUsable: rejects a symlink standing in for a slot directory', (t)
   const link = path.join(dir, 'link');
   const file = path.join(dir, 'file');
   fs.mkdirSync(real);
-  fs.symlinkSync(real, link);
+  plantDirLink(real, link); // a junction on win32 — lstat cannot tell it apart
   fs.writeFileSync(file, '');
 
   assert.strictEqual(defaultDirUsable(real), true);
@@ -276,7 +281,7 @@ test('sweepDeadInstances: only numeric member dirs are candidates, and never thr
   makeInstance(home, 1, { [OWNER_FILE]: `${DEAD_PID}:1` });
   fs.mkdirSync(path.join(root, 'not-a-slot'));
   const target = makeInstance(home, 9, { [OWNER_FILE]: `${DEAD_PID}:1` });
-  fs.symlinkSync(target, path.join(root, '3'));
+  plantDirLink(target, path.join(root, '3'));
   // Slots 1 and 9 are dead members and go; the symlink at "3" is skipped, so
   // its target is only ever touched under its own name.
   assert.strictEqual(sweepDeadInstances({ home, minAgeMs: 0 }), 2);
