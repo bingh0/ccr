@@ -68,9 +68,18 @@ const short = (/** @type {string} */ oid) => oid.slice(0, 7);
  * Skips — loudly — when there is no repository at all, which is the ordinary
  * case of publishing from an unpacked tarball.
  *
+ * Called two ways. At publish time it works out the range itself: HEAD against
+ * whatever remote-tracking ref names the public branch. At PUSH time the hook
+ * has already resolved both ends — the live public tip via `git ls-remote`, and
+ * the exact sha being pushed, which is not necessarily HEAD — and passes them
+ * in. The pushed range is the honest one: it is what the remote will actually
+ * gain, and it does not trust a remote-tracking ref that may be stale.
+ *
+ * @param {{ tip?: string|null, published?: string|null, verb?: 'publish'|'push' }} [opts]
  * @returns {boolean} True to continue, false when the caller should exit 1.
  */
-function historyCheck() {
+function historyCheck(opts = {}) {
+  const verb = opts.verb === 'push' ? 'push' : 'publish';
   const repo = discoverRepo(process.cwd());
   if (!repo.found || !repo.gitDir) {
     console.log('release-gate: no repository here — the history privacy scan did not run.');
@@ -78,16 +87,16 @@ function historyCheck() {
   }
   const gitDir = repo.gitDir;
 
-  const tip = resolveHead(gitDir);
+  const tip = opts.tip || resolveHead(gitDir);
   if (tip === null) {
-    console.error('release-gate: REFUSING to publish — HEAD does not resolve to a commit.');
+    console.error(`release-gate: REFUSING to ${verb} — HEAD does not resolve to a commit.`);
     return false;
   }
 
   const ref = process.env[PUBLIC_REF_KEY] || DEFAULT_PUBLIC_REF;
-  const published = resolveRef(gitDir, ref);
+  const published = opts.published || resolveRef(gitDir, ref);
   if (published === null) {
-    console.error(`release-gate: REFUSING to publish — cannot resolve the published ref ${ref}.`);
+    console.error(`release-gate: REFUSING to ${verb} — cannot resolve the published ref ${ref}.`);
     console.error('             Without it there is no way to know which commits are new.');
     console.error(`             Fetch it, or name the right one: ${PUBLIC_REF_KEY}=refs/remotes/<remote>/<branch>\n`);
     return false;
@@ -95,7 +104,7 @@ function historyCheck() {
 
   const priv = loadPrivatePatterns();
   if (priv.invalid.length > 0) {
-    console.error(`release-gate: REFUSING to publish — unparseable private patterns in ${priv.source}:`);
+    console.error(`release-gate: REFUSING to ${verb} — unparseable private patterns in ${priv.source}:`);
     for (const s of priv.invalid) console.error(`               ${s}`);
     return false;
   }
@@ -105,7 +114,7 @@ function historyCheck() {
   });
 
   if (result.state === 'unavailable') {
-    console.error('release-gate: REFUSING to publish — the object store could not be read,');
+    console.error(`release-gate: REFUSING to ${verb} — the object store could not be read,`);
     console.error('             so the history privacy scan reached no conclusion.');
     return false;
   }
@@ -131,9 +140,9 @@ function historyCheck() {
     return true;
   }
 
-  console.error('release-gate: REFUSING to publish.\n');
+  console.error(`release-gate: REFUSING to ${verb}.\n`);
   console.error('These commits are not public yet, and carry strings the published tree');
-  console.error('does not already contain. Publishing this history would disclose them:\n');
+  console.error(`does not already contain. ${verb === 'push' ? 'Pushing' : 'Publishing'} this history would disclose them:\n`);
 
   /** @type {Map<string, typeof blocking>} */
   const byCommit = new Map();
@@ -158,7 +167,7 @@ function historyCheck() {
   console.error('  git merge --squash <your branch>');
   console.error('  git commit\n');
   console.error('If a finding is genuinely publishable, name the commits that carry it:\n');
-  console.error(`  ${HISTORY_ENV_KEY}="${[...byCommit.keys()].map(short).join(',')}" npm publish\n`);
+  console.error(`  ${HISTORY_ENV_KEY}="${[...byCommit.keys()].map(short).join(',')}" ${verb === 'push' ? 'git push' : 'npm publish'}\n`);
   return false;
 }
 
@@ -202,13 +211,69 @@ function wipCheck() {
   return false;
 }
 
-// Both checks always run. Short-circuiting would hand the operator one reason,
-// let them fix it, and then hand them the second — two round trips to learn
-// what one run already knew.
+/**
+ * A sha the CALLER supplied rather than one this script resolved. Fails closed
+ * on anything that is not a full object id: a truncated or mistyped value would
+ * otherwise scan some other range and report it clean, which is worse than not
+ * scanning at all because it looks like an answer.
+ * @param {string|null|undefined} value
+ * @param {string} what
+ * @returns {string|null}
+ */
+function requireOid(value, what) {
+  if (typeof value === 'string' && /^([0-9a-f]{40}|[0-9a-f]{64})$/i.test(value)) return value.toLowerCase();
+  console.error(`release-gate: REFUSING to push — ${what} is not a full object id: ${value || '(missing)'}`);
+  return null;
+}
+
+/**
+ * @param {string[]} argv
+ * @returns {{ prePush: boolean, tip: string|null, published: string|null }|null}
+ *   null means the arguments themselves were bad; the caller exits rather than
+ *   guessing what was meant.
+ */
+function parseArgs(argv) {
+  /** @type {{ prePush: boolean, tip: string|null, published: string|null }} */
+  const out = { prePush: false, tip: null, published: null };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--pre-push') out.prePush = true;
+    else if (a === '--tip') out.tip = argv[++i] || null;
+    else if (a === '--published') out.published = argv[++i] || null;
+    else {
+      console.error(`release-gate: unknown argument ${a}`);
+      console.error('             usage: release-gate [--pre-push --tip <sha> --published <sha>]');
+      return null;
+    }
+  }
+  return out;
+}
+
+// Both publish-time checks always run. Short-circuiting would hand the operator
+// one reason, let them fix it, and then hand them the second — two round trips
+// to learn what one run already knew.
 function main() {
+  const args = parseArgs(process.argv.slice(2));
+  if (args === null) process.exit(2);
+
+  if (args.prePush) {
+    // The PUSH path runs the history scan only. "Does this release describe
+    // behaviour that exists" is a question about a release, not about a push,
+    // and a hook that refused ordinary pushes over it would get switched off —
+    // taking the privacy scan with it. The scan is the reason this path exists:
+    // a push is the moment history becomes public, and the publish-time check
+    // sees nothing by then because the commits are already on the remote.
+    const tip = requireOid(args.tip, 'the pushed tip (--tip)');
+    const published = requireOid(args.published, 'the live public tip (--published)');
+    if (tip === null || published === null) process.exit(1);
+    process.exit(historyCheck({ tip, published, verb: 'push' }) ? 0 : 1);
+  }
+
   const wipOk = wipCheck();
   const historyOk = historyCheck();
   if (!wipOk || !historyOk) process.exit(1);
 }
 
-main();
+if (require.main === module) main();
+
+module.exports = { parseArgs, requireOid };

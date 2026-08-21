@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+#
+# .githooks/pre-push — FAIL-CLOSED guard to keep private history off the
+# public repository. Install it with `npm run install-hooks`.
+#
+# TRACKED, deliberately. It was local-to-one-clone for a while, which meant a
+# fresh clone had no guard at all — the protection did not survive the thing it
+# was protecting against. There is nothing private in here: the only specific it
+# names is the PUBLIC repository's own URL.
+#
+# For pushes to a PUBLIC remote (matched by URL, so renaming the remote does
+# NOT disable the guard) it requires ALL of:
+#   * only refs/heads/main may be updated
+#   * the pushed tip must fast-forward the LIVE public main (no rewrite/diverge)
+#   * deletions of public refs are refused
+#   * if the public main tip cannot be determined, the push is REFUSED
+# Pushes to any non-public remote (e.g. a private backup) are unrestricted.
+# Deliberate exceptions: git push --no-verify
+#
+set -uo pipefail
+
+remote_name="${1:-}"
+remote_url="${2:-}"
+zero="0000000000000000000000000000000000000000"
+allowed_ref="refs/heads/main"
+
+# ERE patterns identifying the PUBLIC repo. Add a line per extra mirror.
+protected_patterns='github\.com[:/]bingh0/ccr(\.git)?/?$'
+
+# Fall back to the configured URL if git did not supply one ($2 empty).
+if [ -z "$remote_url" ] && [ -n "$remote_name" ]; then
+  remote_url="$(git remote get-url "$remote_name" 2>/dev/null || true)"
+fi
+
+# Is this a protected (public) remote? (heredoc, not a pipe, so the flag persists)
+is_protected=0
+while IFS= read -r pat; do
+  [ -z "$pat" ] && continue
+  if printf '%s' "$remote_url" | grep -Eq "$pat"; then
+    is_protected=1; break
+  fi
+done <<EOF
+$protected_patterns
+EOF
+
+[ "$is_protected" -eq 1 ] || exit 0   # private/other remotes: unrestricted
+
+# LIVE public main tip — not a possibly-stale remote-tracking ref.
+public_main="$(git ls-remote --heads "$remote_name" main 2>/dev/null | awk 'NR==1{print $1}')"
+have_public_main=1
+[ -z "$public_main" ] && have_public_main=0
+
+problems=""
+saw_ref=0
+push_sha=""
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ -z "${local_ref:-}" ] && continue
+  saw_ref=1
+
+  # Gate 0: never delete a ref on the public remote.
+  if [ "$local_sha" = "$zero" ]; then
+    problems+="  refuses to DELETE $remote_ref on the public remote"$'\n'; continue
+  fi
+
+  # Gate 1: only main may land on the public remote (blocks other branches AND tags).
+  if [ "$remote_ref" != "$allowed_ref" ]; then
+    problems+="  $local_ref -> $remote_ref : only $allowed_ref may be pushed"$'\n'; continue
+  fi
+
+  # Gate 2: fail closed if the public main tip is unknown.
+  if [ "$have_public_main" -eq 0 ]; then
+    problems+="  cannot read public main via 'git ls-remote $remote_name main' (offline? no main yet?) — refusing"$'\n'; continue
+  fi
+
+  # Gate 3: pushed tip must fast-forward the live public main.
+  git merge-base --is-ancestor "$public_main" "$local_sha"
+  case "$?" in
+    0) push_sha="$local_sha" ;;  # fast-forward — allowed, and this is what we scan
+    1) problems+="  $local_sha does not fast-forward public main ($public_main) — would rewrite/diverge public history"$'\n' ;;
+    *) problems+="  lineage check errored (git fault) for $local_sha — refusing"$'\n' ;;
+  esac
+done
+
+[ "$saw_ref" -eq 1 ] || exit 0   # nothing being pushed
+
+if [ -n "$problems" ]; then
+  {
+    echo "pre-push: REFUSED push to public remote '$remote_name' ($remote_url)"
+    printf '%s' "$problems"
+    echo "  override (only if you are certain): git push --no-verify"
+  } >&2
+  exit 1
+fi
+
+# ── Gate 4: CONTENT ────────────────────────────────────────────────────────
+#
+# The gates above ask which ref and which lineage. This one asks what is IN the
+# commits, which is the only question whose answer stops being fixable the
+# moment the push lands.
+#
+# It runs here rather than at `npm publish` because by publish time there is
+# nothing left to look at: the publish-time scan compares against
+# origin/main, and the release flow pushes to main FIRST, so the set of
+# "commits not yet public" is empty exactly when it matters. A push is the
+# moment history becomes public. This is that moment.
+#
+# The range is measured from what the remote will actually gain: the sha being
+# pushed, against the LIVE public tip resolved above by ls-remote — never a
+# remote-tracking ref, which can be stale in the unsafe direction. Gate 3
+# already proved $public_main is an ancestor of $push_sha, so the exclusion
+# side is present in the local object store by the time we get here.
+if [ -n "$push_sha" ]; then
+  repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  gate="$repo_root/scripts/release-gate.js"
+
+  if ! command -v node >/dev/null 2>&1; then
+    echo "pre-push: REFUSED — node is not available, so the history privacy scan could not run." >&2
+    echo "  A check that silently did not run is worse than one that says so." >&2
+    echo "  override (only if you are certain): git push --no-verify" >&2
+    exit 1
+  fi
+  if [ ! -f "$gate" ]; then
+    echo "pre-push: REFUSED — $gate is missing, so the history privacy scan could not run." >&2
+    echo "  override (only if you are certain): git push --no-verify" >&2
+    exit 1
+  fi
+  if ! node "$gate" --pre-push --tip "$push_sha" --published "$public_main"; then
+    echo "" >&2
+    echo "pre-push: REFUSED push to public remote '$remote_name' — see the scan above." >&2
+    echo "  override (only if you are certain): git push --no-verify" >&2
+    exit 1
+  fi
+fi
+
+exit 0

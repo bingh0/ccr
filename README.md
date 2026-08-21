@@ -253,9 +253,15 @@ method has followed since, and is honest about which point on that line this
 repository represents.
 
 ```bash
-npm test            # node --test — harness self-tests + feature scenarios
-npm run typecheck   # tsc --noEmit over @ts-check'd JS (needs: npm i first)
+npm test              # node --test — harness self-tests + feature scenarios
+npm run typecheck     # tsc --noEmit over @ts-check'd JS (needs: npm i first)
+npm run install-hooks # copy .githooks/ into this clone (run once)
 ```
+
+`install-hooks` installs a fail-closed `pre-push` guard for the public remote:
+only `main`, fast-forward only, and a scan of the commits the push would make
+public. It is worth running in any clone you push from — a push is the moment
+history stops being private, and it is the last moment the check can help.
 
 - **No runtime dependencies**, ever — it's what lets `npx claude-code-runrate` install
   instantly on every OS, including native Windows.
