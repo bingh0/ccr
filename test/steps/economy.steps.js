@@ -35,7 +35,7 @@ function setWindow(w, key, label, usedPct, dur, windowMinutes) {
 
 function render(/** @type {Record<string, any>} */ w) {
   w.view = w.view || {};
-  w.raw = renderEconomy(w.view, { theme: w.theme || 'plain' });
+  w.raw = renderEconomy(w.view, { theme: w.theme || 'plain', ageMs: w.ageMs || 0 });
   w.out = strip(w.raw);
   w.lines = w.out.split('\n');
   w.hero = w.lines[2] || '';                          // [0]=title [1]=blank [2]=hero
@@ -69,6 +69,11 @@ module.exports = function defineEconomySteps(reg) {
   });
   reg.define(/^the session cost so far is ([\d.]+) USD$/, (w, usd) => { w.view.costUsd = Number(usd); });
   reg.define(/^the mary interface is enabled$/, (w) => { w.theme = 'mary'; });
+  // Fractional used% gets its own phrasing so it can never collide with the
+  // integer "is N% used" setters — the harness rejects ambiguous step patterns.
+  reg.define(/^the 5h window's raw used_percentage is ([\d.]+), resetting in (.+)$/,
+    (w, used, dur) => setWindow(w, '5h', '5h', used, dur, 300));
+  reg.define(/^the snapshot was captured (\d+) minutes? ago$/, (w, min) => { w.ageMs = Number(min) * 60000; });
 
   // --- Action ---
   reg.define(/^the economy screen renders$/, render);
@@ -172,5 +177,25 @@ module.exports = function defineEconomySteps(reg) {
   });
   reg.define(/^it shows no fabricated burn rate or time-to-limit$/, (w) => {
     assert.ok(!/next limit/.test(w.out) && !/~\d+[mhd]/.test(w.out), 'no invented time-to-limit');
+  });
+
+  // --- Critical-zone precision + snapshot freshness ---
+  // The dim wrapper is invisible once ANSI is stripped, so these read w.raw.
+  const DIMMED_USED = /\x1b\[2m[^\x1b]*\d% used\x1b\[0m/;
+
+  reg.define(/^the 5h meter reads "([^"]+)% used"$/, (w, shown) => {
+    const row = meterRow(w, '5h');
+    assert.ok(row.includes(shown + '% used'), `5h row should read "${shown}% used" — got: ${row.trim()}`);
+  });
+  reg.define(/^the whole-number part still matches Claude's \/usage floor of (\d+)$/, (w, floorStr) => {
+    const m = /(\d+(?:\.\d)?)% used/.exec(meterRow(w, '5h'));
+    assert.ok(m, 'a used% figure is present');
+    assert.strictEqual(Math.floor(Number(m[1])), Number(floorStr), 'floor(shown) must equal the /usage integer');
+  });
+  reg.define(/^the used% figure is shown dimmed, not as a live value$/, (w) => {
+    assert.match(w.raw, DIMMED_USED, 'used% should be dim-wrapped when the snapshot is stale');
+  });
+  reg.define(/^the used% figure is not dimmed$/, (w) => {
+    assert.doesNotMatch(w.raw, DIMMED_USED, 'used% must not be dim-wrapped while the snapshot is fresh');
   });
 };

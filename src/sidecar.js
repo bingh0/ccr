@@ -351,6 +351,12 @@ function composeFrame(stateDir, opts = {}) {
   if (!raw.trim()) return clamp(dim('ccr · waiting for the first status tick…') + '\n');
   let state;
   try { state = JSON.parse(raw); } catch { return clamp(dim('ccr · status unreadable') + '\n'); }
+  // Snapshot age drives BOTH the dimming of the used figures inside the panel
+  // and the freshness marker appended below — read ONCE so the two can never
+  // disagree about whether what you are looking at is live. An unreadable mtime
+  // reads as fresh: a missing timestamp is not evidence of staleness.
+  let ageMs = 0;
+  try { ageMs = Math.max(0, now - fs.statSync(snapshot).mtimeMs); } catch { /* unknown → fresh */ }
   let out;
   try {
     // 5h/weekly are ACCOUNT-WIDE but captured per-profile, so an idle sibling's
@@ -358,7 +364,7 @@ function composeFrame(stateDir, opts = {}) {
     // SAME account (see src/account-limits.js) before rendering — best-effort, and
     // strictly guarded so a different account is never mixed in.
     const reconciled = { ...state, rate_limits: freshenAccountLimits(state.rate_limits, stateDir, opts.home ? { home: opts.home } : {}) };
-    out = renderEconomy(normalizeStatus(reconciled), { tick: Math.floor(now / 1000) % 2 === 0 });
+    out = renderEconomy(normalizeStatus(reconciled), { tick: Math.floor(now / 1000) % 2 === 0, ageMs });
     // ccr's own view is position 1 of the cycle, named only when the cycle is
     // long enough for the position to tell you something (see showPosition).
     if (showPosition) out = out.replace(/\n/, dim(`   ${positionAt(0)}`) + '\n');
@@ -385,11 +391,8 @@ function composeFrame(stateDir, opts = {}) {
   // quiet "updated Nm ago" so a stale panel reads as stale rather than broken —
   // otherwise a long agent run (or a CC statusLine that stopped firing) looks like
   // the sidecar just froze. See src/liveness.js + features/liveness.feature.
-  try {
-    const ageMs = now - fs.statSync(snapshot).mtimeMs;
-    const mark = liveness({ exited: false, ageMs }).marker;
-    if (mark) out += (out.endsWith('\n') ? '' : '\n') + '  ' + dim('· ' + mark);
-  } catch { /* snapshot mtime unknown → no marker */ }
+  const mark = liveness({ exited: false, ageMs }).marker;
+  if (mark) out += (out.endsWith('\n') ? '' : '\n') + '  ' + dim('· ' + mark);
   // A config the user wrote and got wrong used to cost the panes in silence —
   // the panel rendered exactly as it does for someone who configured nothing,
   // so a typo was indistinguishable from never having tried. Name it here and

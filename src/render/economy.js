@@ -10,16 +10,23 @@
 const { clearROI } = require('../burn');
 const { classifyWindows, band } = require('../economy-model');
 const { resolveTheme, lexicon } = require('../theme');
-const { dim, bold, green, red, yellow, cyan, flash, pctColor, bar, tok, fmtMins, fmtReset } = require('./shared');
+const { dim, bold, green, red, yellow, cyan, flash, pctColor, CRIT_PCT, usedLabel, bar, tok, fmtMins, fmtReset } = require('./shared');
+const { liveness } = require('../liveness');
 
 const bandColor = { imminent: red, warn: yellow, ok: cyan };
 
-function wallRow(/** @type {any} */ row, /** @type {any} */ L, /** @type {boolean} */ tick, /** @type {number} */ labelW) {
+function wallRow(/** @type {any} */ row, /** @type {any} */ L, /** @type {boolean} */ tick, /** @type {number} */ labelW, /** @type {boolean} */ stale, /** @type {number} */ numW) {
   // Truncate, don't round: Claude's own surfaces (`/usage`, claude.ai usage)
   // floor the fractional `used_percentage` (e.g. 41.6 → "41%"). Math.round here
   // read ~1pt high on values past the half-point. Display only — the burn/ROI
   // math below still uses the raw fractional `row.est.usedPct`.
+  //
+  // `used` (whole %) drives the bar fill and the colour band; `usedTxt` is the
+  // number actually shown, which gains one truncated decimal in the critical
+  // zone. Both floor, so they can never disagree about which side of a whole
+  // number the reading falls on.
   const used = Math.floor(row.est.usedPct);
+  const usedTxt = usedLabel(row.est.usedPct);
   const ml = row.est.minutesLeft;
   const b = band(ml);
   // Per-row colour dot: green when the window resets before you'd hit it,
@@ -37,7 +44,11 @@ function wallRow(/** @type {any} */ row, /** @type {any} */ L, /** @type {boolea
   const leftTxt = (ml != null ? '~' + fmtMins(ml) : '—').padEnd(7);
   const left = row.binding ? bold(leftTxt) : dim(leftTxt);
   const resets = row.reset != null ? dim('resets ' + fmtReset(row.reset)) : '';
-  const meter = pctColor(used)(bar(used)) + ' ' + String(used).padStart(2) + '% used';
+  // A stale snapshot dims the figure so a number frozen between chat rounds
+  // never reads as live. The bar colour stays, so the band still pops, and the
+  // sidecar appends the "updated …" note that says why (see src/liveness.js).
+  const numTxt = usedTxt.padStart(numW) + '% used';
+  const meter = pctColor(used)(bar(used)) + ' ' + (stale ? dim(numTxt) : numTxt);
   const main = '  ' + dot + ' ' + label + ' ' + left + ' ' + meter + '  ' + resets;
 
   // The binding window's "wall" call-out drops to its own indented line below —
@@ -51,16 +62,30 @@ function wallRow(/** @type {any} */ row, /** @type {any} */ L, /** @type {boolea
 
 /**
  * @param {any} view normalized economy data
- * @param {{ theme?: 'plain'|'mary', now?: Date, tick?: boolean, env?: any }} [opts]
+ * @param {{ theme?: 'plain'|'mary', now?: Date, tick?: boolean, env?: any,
+ *   ageMs?: number, staleMs?: number }} [opts]
+ *   ageMs/staleMs: how old the captured snapshot is, and the threshold past
+ *   which it counts as stale. The snapshot only refreshes per chat round, so
+ *   between rounds it ages — past the threshold the used figures dim, so they
+ *   read as last-known rather than live. The threshold decision itself stays
+ *   in src/liveness.js, which also owns the "updated …" note the sidecar
+ *   appends; this renderer only asks whether the data is stale.
  * @returns {string}
  */
 function renderEconomy(view, opts = {}) {
   const themeName = opts.theme || resolveTheme(opts.now, opts.env);
   const L = lexicon(themeName);
   const tick = !!opts.tick;
+  const stale = !!liveness({ ageMs: opts.ageMs ?? 0, staleMs: opts.staleMs }).marker;
   const out = [bold('economy') + dim('   ' + (view.model || '')), ''];
 
   const { rows, next } = classifyWindows(view);
+  // The used% column widens to fit a decimal only when some row actually has
+  // one. Widening it unconditionally would shift every meter two columns right
+  // for the whole time you are nowhere near the wall — which both costs a
+  // narrow sidebar two columns it needs and blunts the point of the decimal,
+  // whose appearing is itself the "you are in the zone" cue.
+  const numW = rows.some((/** @type {any} */ r) => r.est.usedPct >= CRIT_PCT && r.est.usedPct < 100) ? 4 : 2;
   // Cap the label column. `labelW` multiplies: every row pads to it, so cost is
   // rows × longest-label, and BOTH come from the snapshot's rate_limits keys. A
   // planted file with many buckets and one very long key built a string large
@@ -86,7 +111,7 @@ function renderEconomy(view, opts = {}) {
   }
   out.push('');
 
-  for (const r of rows) out.push(wallRow(r, L, tick, labelW));
+  for (const r of rows) out.push(wallRow(r, L, tick, labelW, stale, numW));
   if (rows.length) out.push('');
 
   // CLEAR — plain language, framed against the binding wall, only when it looms.

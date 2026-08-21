@@ -46,6 +46,10 @@ module.exports = function defineStatuslineSteps(reg) {
     (w, u, dur, rate) => setWindow(w, 'five_hour', '5h', u, dur, Number(rate)));
   reg.define(/^a weekly limit at (\d+)% used, resetting in (\S+), burning ([\d.]+)%\/min$/,
     (w, u, dur, rate) => setWindow(w, 'seven_day', 'weekly', u, dur, Number(rate)));
+  // Fractional used% — the distinct "at a raw" phrasing keeps it clear of the
+  // integer setters above (the harness rejects ambiguous step patterns).
+  reg.define(/^a 5h limit at a raw ([\d.]+)% used, resetting in (\S+), burning ([\d.]+)%\/min$/,
+    (w, u, dur, rate) => setWindow(w, 'five_hour', '5h', u, dur, Number(rate)));
   reg.define(/^status context of (\S+) tokens in a (\S+) window$/, (w, ctx, win) => {
     view(w).contextTokens = parseTok(ctx); view(w).windowSize = parseTok(win);
   });
@@ -63,4 +67,14 @@ module.exports = function defineStatuslineSteps(reg) {
   reg.define(/^the line contains the warning marker$/, (w) => assert.ok(w.line.includes('⚠'), `no marker in: ${w.line}`));
   reg.define(/^the line states there are no limits$/, (w) => assert.ok(/no limits/i.test(w.line), w.line));
   reg.define(/^the line shows no fabricated time-to-limit$/, (w) => assert.ok(!/~\d/.test(w.line), `unexpected time figure: ${w.line}`));
+
+  // --- Critical-zone progressive disclosure ---
+  reg.define(/^the line shows the binding used% as "([^"]+)"$/,
+    (w, s) => assert.ok(w.line.includes(s), `expected "${s}" in: ${w.line}`));
+  reg.define(/^the binding window shows time-to-limit but no used% figure$/, (w) => {
+    assert.match(w.line, /~\d/, `expected a time-to-limit in: ${w.line}`);
+    // A disclosed used% renders as "<n>% ~<time>". The context percentage
+    // ("ctx 15%") is never followed by a time, so it cannot false-positive here.
+    assert.ok(!/%\s*~/.test(w.line), `unexpected used% before the time in: ${w.line}`);
+  });
 };

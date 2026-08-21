@@ -60,3 +60,44 @@ test('the 5h and weekly meter bars stay vertically aligned at an absurd time-to-
   const barCol = (/** @type {string} */ l) => l.search(/[▓░]/);
   assert.strictEqual(barCol(rows[0]), barCol(rows[1]), 'both meter bars share one column');
 });
+
+test('the used% column widens only when a row is actually in the critical zone', () => {
+  // The decimal is a salience cue, so it must not cost two columns of a narrow
+  // sidebar for the whole time nothing is near the wall. Below the zone the
+  // meter row is byte-identical to what it was before precision existed.
+  const view = (/** @type {number} */ fivePct) => ({
+    model: 'Fable 5', windowSize: 1000000,
+    windows: [
+      { key: 'five_hour', label: '5h', usedPct: fivePct, minutesToReset: 120, windowMinutes: 300 },
+      { key: 'seven_day', label: 'weekly', usedPct: 62.3, minutesToReset: 4000, windowMinutes: 10080 },
+    ],
+  });
+  const meters = (/** @type {number} */ p) =>
+    strip(renderEconomy(view(p), { theme: 'plain' })).split('\n').filter((l) => /[▓░]/.test(l));
+
+  const calm = meters(80.4);
+  assert.match(calm[0], / 80% used/, 'below the zone: whole number, single space');
+  assert.match(calm[1], / 62% used/, 'the sibling row keeps its narrow column too');
+
+  const zone = meters(98.76);
+  assert.match(zone[0], / 98\.7% used/, 'in the zone: one truncated decimal');
+  assert.match(zone[1], /   62% used/, 'the sibling row pads so both align on the %');
+
+  // The alignment invariant holds in both states: the "% used" labels line up.
+  for (const rows of [calm, zone]) {
+    const pctCol = (/** @type {string} */ l) => l.indexOf('% used');
+    assert.strictEqual(pctCol(rows[0]), pctCol(rows[1]), 'both used% figures share one column');
+  }
+});
+
+test('a used% at or past 100 stays a whole number', () => {
+  // usedLabel's upper guard: "100.0% used" would be a wider column for a value
+  // whose extra digit says nothing — you are past the wall either way.
+  const at = (/** @type {number} */ p) => strip(renderEconomy({
+    model: 'Fable 5', windowSize: 1000000,
+    windows: [{ key: 'five_hour', label: '5h', usedPct: p, minutesToReset: 120, windowMinutes: 300 }],
+  }, { theme: 'plain' }));
+  assert.match(at(100), /\b100% used/);
+  assert.ok(!/100\.0% used/.test(at(100)), 'no decimal at 100');
+  assert.match(at(103.4), /\b103% used/);
+});

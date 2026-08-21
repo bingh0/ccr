@@ -104,6 +104,46 @@ Feature: Economy screen readability and intuitiveness
     When the economy screen renders
     Then the screen uses the phrase "bad moon rising"
 
+  # --- Critical-zone precision: full-accuracy used% near the wall ---
+  # Everyone is used to a whole-number readout. Near the limit the next tenth is
+  # a decision input rather than noise, so the screen surfaces one more digit of
+  # Claude's own fractional used_percentage — TRUNCATED, so floor(shown) never
+  # exceeds what /usage reports. A decimal appearing is itself the salience cue.
+
+  Scenario Outline: Past the critical threshold the used% gains one truncated decimal
+    Given the 5h window's raw used_percentage is <pct>, resetting in 2h00m
+    When the economy screen renders
+    Then the 5h meter reads "<shown>% used"
+    And the whole-number part still matches Claude's /usage floor of <floor>
+
+    Examples:
+      | pct   | shown | floor |
+      | 92.40 | 92    | 92    |
+      | 95.04 | 95.0  | 95    |
+      | 98.76 | 98.7  | 98    |
+      | 99.99 | 99.9  | 99    |
+
+  # --- Freshness: a figure that stopped moving must stop claiming to be live ---
+  # The snapshot only refreshes per chat round, so a precise figure can sit frozen
+  # while you are away. The "updated …" note that says why belongs to the sidecar
+  # (features/liveness.feature); what this screen owes is that the number itself
+  # stops reading as current. Dimmed, never blanked — the last-known value is
+  # still the most useful thing on the screen.
+
+  Scenario: A stale snapshot dims the used% so it reads as last-known, not live
+    Given the 5h window's raw used_percentage is 98.76, resetting in 2h00m
+    And the snapshot was captured 6 minutes ago
+    When the economy screen renders
+    Then the used% figure is shown dimmed, not as a live value
+
+  # The discriminating half of the pair: without it a renderer that dimmed
+  # unconditionally would pass the scenario above while asserting nothing.
+
+  Scenario: A fresh snapshot leaves the used% undimmed
+    Given the 5h window's raw used_percentage is 98.76, resetting in 2h00m
+    When the economy screen renders
+    Then the used% figure is not dimmed
+
   # --- Graceful degrade for API users (decision: subscription-only) ---
 
   Scenario: An API session with no rate-limit meter degrades gracefully

@@ -29,6 +29,25 @@ Feature: Status-line one-line summary
     When the status line renders
     Then the line contains the warning marker
 
+  # --- Critical-zone progressive disclosure: precise used% only near the wall ---
+  # The line stays a single glanceable beat by default. Only when the binding
+  # window enters the critical zone does it earn the precise (truncated) used%,
+  # so floor(shown) still matches /usage. A percentage that is always there stops
+  # being a signal at the moment it starts to matter.
+
+  Scenario: In the critical zone the binding window earns its precise used%
+    Given a status view on model "Opus 4.8"
+    And a 5h limit at a raw 98.76% used, resetting in 4h00m, burning 2.0%/min
+    When the status line renders
+    Then the line shows the binding used% as "5h 98.7%"
+    And the line contains no ANSI colour codes
+
+  Scenario: Below the critical zone the status line stays lean
+    Given a status view on model "Opus 4.8"
+    And a 5h limit at a raw 80.40% used, resetting in 4h00m, burning 0.10%/min
+    When the status line renders
+    Then the binding window shows time-to-limit but no used% figure
+
   Scenario: An API session with no rate-limit meters degrades to a plain note
     Given a status view on model "Opus 4.8" with no rate limits
     When the status line renders

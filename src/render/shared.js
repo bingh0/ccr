@@ -16,6 +16,26 @@ const flash = (/** @type {boolean} */ tick, /** @type {string} */ s) => (tick ? 
 
 const pctColor = (/** @type {number} */ p) => (p >= 75 ? red : p >= 60 ? yellow : green);
 
+// At/above this used%, surface one extra digit of Claude's own (fractional)
+// `used_percentage`. Near the wall the next tenth is a decision input; below it
+// it is noise. A decimal appearing IS the "you are in the zone" salience signal.
+const CRIT_PCT = 95;
+
+/**
+ * Used% display string. Below the critical zone: the whole number. In the zone
+ * (and under 100): one TRUNCATED decimal — the same downward direction as the
+ * integer floor, so `floor(shown)` still equals what `/usage` reports. We never
+ * tick above Claude's own number, only out-resolve it. The +1e-9 guards float
+ * representation: 98.7 * 10 is 986.9999… and would otherwise truncate to 98.6.
+ * @param {number} pct raw fractional used_percentage
+ * @returns {string}
+ */
+function usedLabel(pct) {
+  if (pct < CRIT_PCT || pct >= 100) return String(Math.floor(pct));
+  const tenths = Math.floor(pct * 10 + 1e-9);
+  return `${Math.floor(tenths / 10)}.${tenths % 10}`;
+}
+
 function bar(/** @type {number} */ p, w = 10) {
   const f = Math.max(0, Math.min(w, Math.round((p / 100) * w)));
   return '▓'.repeat(f) + '░'.repeat(w - f);
@@ -186,6 +206,6 @@ function ellipsize(s, cols) {
 }
 
 module.exports = {
-  e, dim, bold, green, red, yellow, cyan, flash, pctColor, bar, clampVisible, tok, fmtMins, fmtReset,
+  e, dim, bold, green, red, yellow, cyan, flash, pctColor, CRIT_PCT, usedLabel, bar, clampVisible, tok, fmtMins, fmtReset,
   charWidth, visibleWidth, ellipsize,
 };
