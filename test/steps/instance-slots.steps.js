@@ -15,6 +15,10 @@ const path = require('node:path');
 const slots = require('../../src/instance-slot');
 const { HEARTBEAT_FILE: HEARTBEAT } = require('../../src/sidecar');
 const { freshenAccountLimits } = require('../../src/account-limits');
+// The planted link points at a DIRECTORY, so a junction realizes this scenario
+// faithfully on Windows: lstat still reports a symbolic link and
+// defaultDirUsable still refuses it. features/design/test-link-fixtures.feature.
+const { plantDirLink } = require('../_links');
 
 const T5 = 1_783_101_000; // shared 5h reset instant
 const TW = 1_783_616_400; // shared weekly reset instant
@@ -107,7 +111,7 @@ module.exports = function defineInstanceSlotsSteps(reg) {
     fs.mkdirSync(victim, { recursive: true });
     fs.chmodSync(victim, 0o755);
     fs.mkdirSync(path.join(home(w), '.ccr'), { recursive: true });
-    fs.symlinkSync(victim, dirOf(w, Number(n)));
+    plantDirLink(victim, dirOf(w, Number(n)));
     w.victim = victim;
   });
 

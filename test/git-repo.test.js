@@ -30,6 +30,10 @@ const { execFileSync } = require('node:child_process');
 const { readGitRepo, discoverRepo, MAX_WALK, NAME_MAX } = require('../src/git-repo');
 const { renderGitPane } = require('../src/render/git-pane');
 const { recordLaunchDir } = require('../src/state-dir');
+// features/design/test-link-fixtures.feature — a symlink to a FILE cannot be
+// planted unprivileged on Windows, and no substitute preserves the property
+// under test, so this one skips by name there.
+const { plantFileLink, skipWithoutFileSymlinks } = require('./_links');
 
 const plain = (/** @type {string} */ s) => s.replace(/\x1b\[[0-9;]*m/g, '');
 
@@ -244,11 +248,11 @@ test('an overlong name is cut by code point and marked as cut', (t) => {
 
 // ── recordLaunchDir writes safely ────────────────────────────────────────────
 
-test('recordLaunchDir refuses to write through a planted symlink', (t) => {
+test('recordLaunchDir refuses to write through a planted symlink', { skip: skipWithoutFileSymlinks() }, (t) => {
   const dir = tmp(t);
   const victim = path.join(dir, 'victim');
   fs.writeFileSync(victim, 'ORIGINAL\n');
-  fs.symlinkSync(victim, path.join(dir, 'launch-cwd'));
+  plantFileLink(victim, path.join(dir, 'launch-cwd'));
 
   recordLaunchDir(dir, '/home/me/anything');
   assert.strictEqual(fs.readFileSync(victim, 'utf8'), 'ORIGINAL\n',
@@ -256,7 +260,7 @@ test('recordLaunchDir refuses to write through a planted symlink', (t) => {
   assert.strictEqual(fs.readFileSync(path.join(dir, 'launch-cwd'), 'utf8'), '/home/me/anything\n');
 });
 
-test('recordLaunchDir does not block on a planted fifo', { skip: process.platform === 'win32' }, (t) => {
+test('recordLaunchDir does not block on a planted fifo', { skip: process.platform === 'win32' && 'Windows has no mkfifo — NTFS cannot hold the fixture' }, (t) => {
   const dir = tmp(t);
   try {
     execFileSync('mkfifo', [path.join(dir, 'launch-cwd')], { stdio: 'ignore' });
