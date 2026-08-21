@@ -67,6 +67,28 @@ Feature: Pane blob discovery through user configuration
     When the sidecar loads its pane configuration
     Then the pane path resolves under the user's home directory
 
+  Scenario: A tilde followed by a backslash expands too
+    # A Windows user writes the separator their shell shows them. Accepting only
+    # `~/` left `~\tools\blob.json` to resolve against the config directory
+    # instead — a path that cannot exist, and whose only symptom was a pane that
+    # never appeared. What the tilde means does not depend on what follows it.
+    Given a configuration naming a blob path beginning with a tilde and a backslash
+    When the sidecar loads its pane configuration
+    Then the pane path begins at the user's home directory
+
+  # --- Written on Windows ---
+
+  Scenario: A configuration saved with a byte-order mark still parses
+    # PowerShell writes UTF-8 WITH a BOM by default — Set-Content, Out-File, and
+    # `>` under Windows PowerShell all do — and JSON.parse rejects it. So the
+    # obvious way to write this file on Windows produced a malformed config, and
+    # the only symptom was panes that never appeared. There is no configuration
+    # for which a leading BOM is content, so it is stripped rather than reported.
+    Given a configuration file saved with a UTF-8 byte-order mark
+    When the sidecar loads its pane configuration
+    Then the configured pane is read from it as normal
+    And no configuration error is reported
+
   # --- A bad config costs the panes, never the panel ---
 
   @security
@@ -75,6 +97,22 @@ Feature: Pane blob discovery through user configuration
     When the sidecar loads its pane configuration
     Then no panes are configured
     And loading the configuration raises nothing
+    And the configuration error is named as "not valid JSON"
+
+  Scenario: A configuration with no pane list is named, not silently ignored
+    Given a configuration file whose top level has no pane list
+    When the sidecar loads its pane configuration
+    Then no panes are configured
+    And the configuration error is named as "no panes array"
+
+  Scenario: A broken configuration says so on the panel
+    # The panes are gone either way. What changed is that the panel no longer
+    # looks IDENTICAL to one belonging to a user who configured nothing at all,
+    # which is what made a typo indistinguishable from never having tried.
+    Given a configuration file that is not parseable JSON
+    When the sidecar renders its panel
+    Then the panel names the configuration as the problem
+    And the panel still shows the economy view
 
   Scenario: Entries that are not objects with a string path are skipped
     Given a configuration whose pane list mixes valid entries with junk
@@ -93,6 +131,9 @@ Feature: Pane blob discovery through user configuration
     When the sidecar loads its pane configuration
     Then no panes are configured
     And the sidecar still renders its own economy view
+    # The discriminating half of the error state: without this, a loader that
+    # reported an error unconditionally would satisfy every scenario above.
+    And no configuration error is reported
 
   @security
   Scenario: The configuration file itself is read under the safe-read rules

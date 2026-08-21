@@ -64,8 +64,14 @@ function configPath(env) {
  */
 function resolvePanePath(p, baseDir, home) {
   let out = p;
+  // `~\` as well as `~/`: a Windows user writes the separator their shell shows
+  // them, and accepting only the forward slash left `~\tools\blob.json` to
+  // resolve against the config directory — a path that cannot exist, whose only
+  // symptom is a pane that never appears. The tilde means home on the machine
+  // the config was written for; the separator it is followed by does not
+  // change that.
   if (out === '~') out = home;
-  else if (out.startsWith('~/')) out = path.join(home, out.slice(2));
+  else if (out.startsWith('~/') || out.startsWith('~\\')) out = path.join(home, out.slice(2));
   return path.resolve(baseDir, out);
 }
 
@@ -75,22 +81,38 @@ function resolvePanePath(p, baseDir, home) {
  * economy sidebar exactly as before this feature existed.
  *
  * @param {{ env?: Record<string, string|undefined>, home?: string }} [opts]
- * @returns {{ panes: Array<{ path: string, source: string }>, configPath: string }}
+ * @returns {{ panes: Array<{ path: string, source: string }>, configPath: string,
+ *   error: string|null }}
  *   `path` is absolute and ready to read; `source` is the string the user wrote
  *   (what error states name, so the message matches their config, not ours).
+ *   `error` names why a config that EXISTS produced no panes. A config that is
+ *   simply absent is not an error — that is most users — but one the user wrote
+ *   and got wrong must say so somewhere, or the only symptom of a typo is panes
+ *   that never appear.
  */
 function loadPaneConfig(opts = {}) {
   const env = opts.env || process.env;
   const home = opts.home || os.homedir();
   const file = configPath(env);
-  const empty = { panes: [], configPath: file };
+  const empty = { panes: [], configPath: file, error: null };
 
   const raw = readTextCapped(file, MAX_CONFIG_BYTES);
   if (raw == null || !raw.trim()) return empty;
 
+  // A UTF-8 byte-order mark makes JSON.parse throw. PowerShell writes one by
+  // default — `Set-Content`, `Out-File`, and `>` under Windows PowerShell all
+  // do — so a config written the obvious way on Windows is malformed on
+  // arrival, and the only symptom is panes that never appear. Strip it rather
+  // than diagnose it later: there is no config for which a leading BOM is
+  // content. (`.trim()` above already treats a BOM-only file as empty; U+FEFF
+  // is whitespace to the trimmer but not to the parser.)
+  const text = raw.replace(/^\uFEFF/, '');
+
   let parsed;
-  try { parsed = JSON.parse(raw); } catch { return empty; }
-  if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.panes)) return empty;
+  try { parsed = JSON.parse(text); } catch { return { ...empty, error: 'not valid JSON' }; }
+  if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.panes)) {
+    return { ...empty, error: 'no panes array' };
+  }
 
   const baseDir = path.dirname(file);
   /** @type {Array<{ path: string, source: string }>} */
@@ -103,7 +125,7 @@ function loadPaneConfig(opts = {}) {
     if (!source.trim()) continue;
     panes.push({ path: resolvePanePath(source, baseDir, home), source });
   }
-  return { panes, configPath: file };
+  return { panes, configPath: file, error: null };
 }
 
 module.exports = { loadPaneConfig, configPath, resolvePanePath, MAX_CONFIG_BYTES };

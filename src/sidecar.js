@@ -167,6 +167,7 @@ function updateFeed(tpath) {
 
 const dim = (/** @type {string} */ s) => `\x1b[2m${s}\x1b[0m`;
 const bold = (/** @type {string} */ s) => `\x1b[1m${s}\x1b[0m`;
+const yellow = (/** @type {string} */ s) => `\x1b[33m${s}\x1b[0m`;
 
 let prev = '';
 function draw(/** @type {string} */ s) {
@@ -271,7 +272,8 @@ function composeFrame(stateDir, opts = {}) {
   // External panes. Config is re-read per tick so adding a pane needs no
   // relaunch, and it is best-effort: a broken config costs the panes, never the
   // panel (loadPaneConfig is total — see src/pane-config.js).
-  const panes = opts.panes || loadPaneConfig().panes;
+  const cfg = opts.panes ? { panes: opts.panes, error: null } : loadPaneConfig();
+  const panes = cfg.panes;
   // View order: 0 economy, 1 the git pane, 2… external panes. The git pane is
   // BUILT IN and therefore always in the cycle — including in a directory that
   // is not a repository at all, where it says so. A view that appeared and
@@ -388,6 +390,15 @@ function composeFrame(stateDir, opts = {}) {
     const mark = liveness({ exited: false, ageMs }).marker;
     if (mark) out += (out.endsWith('\n') ? '' : '\n') + '  ' + dim('· ' + mark);
   } catch { /* snapshot mtime unknown → no marker */ }
+  // A config the user wrote and got wrong used to cost the panes in silence —
+  // the panel rendered exactly as it does for someone who configured nothing,
+  // so a typo was indistinguishable from never having tried. Name it here and
+  // send them to `ccr doctor`, which has room for the path and the reason.
+  // Still never fatal: the panel is whole, only the panes are missing.
+  if (cfg.error) {
+    out += (out.endsWith('\n') ? '' : '\n')
+      + '  ' + yellow('· config: ' + cfg.error) + dim(' — see `ccr doctor`');
+  }
   return clamp(out.endsWith('\n') ? out : out + '\n');
 }
 

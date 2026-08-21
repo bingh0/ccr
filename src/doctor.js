@@ -9,6 +9,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 const { stripControl } = require('./sanitize');
+const { loadPaneConfig } = require('./pane-config');
 
 const ok = (/** @type {string} */ s) => `\x1b[32m✓\x1b[0m ${s}`;
 const bad = (/** @type {string} */ s) => `\x1b[31m✗\x1b[0m ${s}`;
@@ -36,7 +37,8 @@ function isExec(/** @type {string} */ f) {
 
 /**
  * @param {{ platform?: string, has?: (cmd: string) => (string|null),
- *   homedir?: string, repo?: string, write?: (s: string) => void }} [opts]
+ *   homedir?: string, repo?: string, write?: (s: string) => void,
+ *   env?: Record<string, string|undefined> }} [opts]
  *   side effects are injectable for testing; defaults hit the real environment
  * @returns {number} exit code (0 = healthy)
  */
@@ -89,6 +91,24 @@ function run(opts = {}) {
     out.push(ok(`ccs (${stripControl(ccs)}) · profiles: ${profiles.map(stripControl).join(', ') || '(none)'}`));
   } else {
     out.push(dim('· ccs not installed (optional — only for `ccr <profile>`)'));
+  }
+
+  // Pane wiring. This command exists to diagnose "nothing happens", and a pane
+  // config the user wrote and got wrong is exactly that — the sidecar has room
+  // for a one-line marker and no more. Here there is room for the path, the
+  // reason, and what ccr actually read out of the file, which is the question
+  // someone whose pane never appeared is really asking.
+  const cfg = loadPaneConfig({ env: opts.env, home: homedir });
+  if (cfg.error) {
+    out.push(bad(`pane config: ${cfg.error} — ${stripControl(cfg.configPath)}`));
+    problems++;
+  } else if (cfg.panes.length) {
+    out.push(ok(`pane config: ${cfg.panes.length} pane(s) (${stripControl(cfg.configPath)})`));
+    // The path as ccr resolved it, not as written: a tilde that did not expand
+    // is invisible in the source string and obvious in the resolved one.
+    for (const pane of cfg.panes) out.push(dim(`  · ${stripControl(pane.path)}`));
+  } else {
+    out.push(dim(`· no panes configured (optional — ${stripControl(cfg.configPath)})`));
   }
 
   // newest captured snapshot across the container. Instances live TWO levels

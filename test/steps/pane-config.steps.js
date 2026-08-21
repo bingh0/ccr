@@ -114,6 +114,25 @@ module.exports = function definePaneConfigSteps(reg) {
     assert.strictEqual(w.result.panes[0].path, path.join(w.home, 'tools', 'blob.json'));
   });
 
+  reg.define(/^a configuration naming a blob path beginning with a tilde and a backslash$/, (w) => {
+    w.home = path.join(os.tmpdir(), 'ccr-fake-home');
+    withConfig(w, JSON.stringify({ panes: [{ path: '~\\tools\\blob.json' }] }));
+  });
+  reg.define(/^the pane path begins at the user's home directory$/, (w) => {
+    // Deliberately not an equality check: the tail after the tilde stays as the
+    // user wrote it, so it is native on Windows and a literal backslash in a
+    // filename on POSIX. What must hold on both is that the tilde expanded.
+    const got = w.result.panes[0].path;
+    assert.ok(got.startsWith(w.home + path.sep), `expected a path under ${w.home}, got: ${got}`);
+  });
+
+  reg.define(/^a configuration file saved with a UTF-8 byte-order mark$/, (w) => {
+    withConfig(w, '\uFEFF' + JSON.stringify({ panes: [{ path: '/tools/blob.json' }] }));
+  });
+  reg.define(/^the configured pane is read from it as normal$/, (w) => {
+    assert.deepStrictEqual(w.result.panes.map((/** @type {any} */ p) => p.source), ['/tools/blob.json']);
+  });
+
   // --- A bad config costs the panes, never the panel ---
 
   reg.define(/^a configuration file that is not parseable JSON$/, (w) => {
@@ -122,6 +141,40 @@ module.exports = function definePaneConfigSteps(reg) {
   reg.define(/^no panes are configured$/, (w) => {
     assert.deepStrictEqual(w.result.panes, []);
   });
+  reg.define(/^the configuration error is named as "([^"]+)"$/, (w, named) => {
+    assert.strictEqual(w.result.error, named, `expected the loader to name "${named}"`);
+  });
+  reg.define(/^no configuration error is reported$/, (w) => {
+    assert.strictEqual(w.result.error, null, `unexpected config error: ${w.result.error}`);
+  });
+  reg.define(/^a configuration file whose top level has no pane list$/, (w) => {
+    withConfig(w, JSON.stringify({ paens: [{ path: '/typo.json' }] }));
+  });
+
+  // --- The panel says so, rather than looking unconfigured ---
+
+  reg.define(/^the sidecar renders its panel$/, (w) => {
+    const { composeFrame } = require('../../src/sidecar');
+    const d = tmp(w);
+    fs.writeFileSync(path.join(d, 'last-status.json'), JSON.stringify({
+      model: { display_name: 'Opus 4.8' }, rate_limits: {}, cost: { total_cost_usd: 1 },
+    }));
+    // composeFrame reads the config through the real loader, so the override has
+    // to be on the process env rather than a passed-in one. Restored either way.
+    const prior = process.env.CCR_CONFIG;
+    process.env.CCR_CONFIG = w.configFile;
+    w.defer(() => {
+      if (prior === undefined) delete process.env.CCR_CONFIG; else process.env.CCR_CONFIG = prior;
+    });
+    w.panel = composeFrame(d, { now: Date.now() });
+  });
+  reg.define(/^the panel names the configuration as the problem$/, (w) => {
+    assert.match(w.panel, /config: not valid JSON/, `no config marker in panel:\n${w.panel}`);
+  });
+  reg.define(/^the panel still shows the economy view$/, (w) => {
+    assert.match(w.panel, /economy/, 'the panel must survive a broken config');
+  });
+
   reg.define(/^loading the configuration raises nothing$/, (w) => {
     // Already proven by reaching here, but assert the contract explicitly: the
     // loader is total, because an exception would reach the draw loop.
