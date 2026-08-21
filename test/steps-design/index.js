@@ -9,6 +9,7 @@
 const defineGitIndexFormatSteps = require('./git-index-format.steps');
 const defineGitObjectStoreSteps = require('./git-object-store.steps');
 const defineGitWorkingTreeRulesSteps = require('./git-working-tree-rules.steps');
+const defineReleaseHistoryPrivacySteps = require('./release-history-privacy.steps');
 const defineTestLinkFixturesSteps = require('./test-link-fixtures.steps');
 
 /** @type {Record<string, (registry: import('../gherkin').StepRegistry) => any>} */
@@ -16,5 +17,6 @@ module.exports = {
   'git-index-format': defineGitIndexFormatSteps,
   'git-object-store': defineGitObjectStoreSteps,
   'git-working-tree-rules': defineGitWorkingTreeRulesSteps,
+  'release-history-privacy': defineReleaseHistoryPrivacySteps,
   'test-link-fixtures': defineTestLinkFixturesSteps,
 };
