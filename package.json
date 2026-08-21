@@ -33,6 +33,7 @@
     "lint": "oxlint",
     "release-gate": "node scripts/release-gate.js",
     "install-hooks": "node scripts/install-hooks.js",
+    "probe:wt": "node scripts/probe-wt.js",
     "prepublishOnly": "npm run release-gate && npm run lint && npm run typecheck && npm test"
   },
   "keywords": [
