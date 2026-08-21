@@ -73,9 +73,14 @@ function launcherDeps(world, opts = {}) {
   world.written = [];
   world.cleaned = [];
   const present = world.present || {};
+  world.recorded = null;
   return {
     env: world.env || {},
     home: world.home || path.join('/home', 'me'),
+    // Pinned rather than inherited: the cwd now reaches wt as `-d`, so leaving
+    // it to withDefaults would put the suite's own working directory into the
+    // spawned argv and make these scenarios machine-dependent.
+    cwd: world.cwd || 'C:\\work\\app',
     node: world.node || '/usr/bin/node',
     ccrJs: world.ccrJs || '/repo/bin/ccr.js',
     out: (/** @type {string} */ s) => { world.out += s; },
@@ -97,6 +102,8 @@ function launcherDeps(world, opts = {}) {
       slot: 1, session: 'ccr', stateDir: path.join(world.home || path.join('/home', 'me'), '.ccr', 'instances', '1'), attached: false,
     })),
     removeExited: (/** @type {string} */ dir) => { world.removedExited.push(dir); },
+    // Recorded, not performed: the real one writes to the fake home.
+    recordLaunchDir: (/** @type {string} */ dir, /** @type {string} */ cwd) => { world.recorded = { dir, cwd }; },
     writeSettings: opts.writeSettings || ((s) => { world.written.push(s); return 'C:\\Temp\\ccr-settings-feat.json'; }),
     cleanup: (/** @type {string} */ f) => { world.cleaned.push(f); },
     spawnWt: (/** @type {string} */ wt, /** @type {string[]} */ args) => { world.spawns.push({ wt, args }); return { status: 0 }; },

@@ -33,6 +33,8 @@ function makeDeps(o = {}) {
     ensureDir: [],
     /** @type {string[]} */
     removeExited: [],
+    /** @type {{ dir: string, cwd: string }[]} */
+    recordLaunchDir: [],
     /** @type {string[]} */
     cleanup: [],
     writeSettings: 0,
@@ -41,6 +43,10 @@ function makeDeps(o = {}) {
   const deps = {
     env: o.env || {},
     home: o.home || '/home/me',
+    // Pinned, not inherited: cwd now reaches wt as `-d`, so leaving it to
+    // withDefaults would make the spawned argv depend on where the suite was
+    // run from — green on one machine, shifted on another.
+    cwd: o.cwd !== undefined ? o.cwd : 'C:\\work\\app',
     node: o.node || '/usr/bin/node',
     ccrJs: o.ccrJs || '/repo/bin/ccr.js',
     out: (s) => outs.push(s),
@@ -61,6 +67,7 @@ function makeDeps(o = {}) {
       attached: false,
     })),
     removeExited: (d) => calls.removeExited.push(d),
+    recordLaunchDir: (dir, cwd) => calls.recordLaunchDir.push({ dir, cwd }),
     writeSettings: o.writeSettings || (() => { calls.writeSettings++; return 'C:\\Temp\\ccr-settings-x.json'; }),
     cleanup: (f) => calls.cleanup.push(f),
     spawnWt: o.spawnWt || ((wt, args) => { calls.spawnWt.push({ wt, args }); return { status: 0 }; }),
@@ -146,9 +153,42 @@ test('run: ccr <profile> targets the CCS state dir (@AC6)', () => {
   assert.strictEqual(code, 0);
 
   const { args } = calls.spawnWt[0];
-  assert.match(args[7], /ccs c1 --settings/);
+  // Found by content, not by index — the argv grows options (`-d`) over time
+  // and a hardcoded position turns an unrelated addition into a red test.
+  assert.ok(args.some((a) => /ccs c1 --settings/.test(a)), 'pane 0 runs the profile');
   const stateDir = path.join('/home/me', '.ccr', 'instances', '1');
   assert.ok(args.filter((a) => a.startsWith('set "CCR_STATE_DIR=')).every((p) => p.includes(stateDir)));
+});
+
+// --- The panes' starting directory (@AC10) --------------------------------
+
+test('run: the launch directory reaches wt and the record from ONE source (@AC10)', () => {
+  const { deps, calls } = makeDeps({ cwd: 'C:\\work\\app' });
+  assert.strictEqual(run(undefined, deps), 0);
+
+  const { args } = calls.spawnWt[0];
+  assert.strictEqual(args[args.indexOf('-d') + 1], 'C:\\work\\app', 'wt is told where to open');
+  assert.strictEqual(calls.recordLaunchDir[0].cwd, 'C:\\work\\app', 'and the record agrees');
+
+  // The whole point of routing both through d.cwd: the git pane reads the
+  // record while Claude Code lives in the pane, so if these two could differ
+  // the sidebar would describe a session that is somewhere else entirely.
+  assert.strictEqual(args[args.indexOf('-d') + 1], calls.recordLaunchDir[0].cwd);
+});
+
+test('run: a directory wt cannot be given still launches, and says so (@AC10)', () => {
+  const { deps, errs, calls } = makeDeps({ cwd: 'C:\\my;dir\\app' });
+  assert.strictEqual(run(undefined, deps), 0, 'a legal directory name never blocks the launch');
+
+  assert.strictEqual(calls.spawnWt.length, 1, 'the window still opens');
+  assert.strictEqual(calls.spawnWt[0].args.includes('-d'), false, 'with no starting directory');
+
+  const msg = errs.join('');
+  assert.match(msg, /my;dir/, 'the directory is named');
+  assert.match(msg, /default directory/, 'and where the panes will land instead');
+
+  // The record still holds the true launch dir — only wt could not be told.
+  assert.strictEqual(calls.recordLaunchDir[0].cwd, 'C:\\my;dir\\app');
 });
 
 test('run: unknown profile errors, lists available, no spawn (@AC6)', () => {

@@ -17,6 +17,7 @@ const {
   sidecarCols,
   buildWtArgs,
   findWindowsTerminal,
+  isWtPathSafe,
 } = require('../src/launch-win.js');
 
 test('validateProfile: accepts safe identifiers', () => {
@@ -223,6 +224,71 @@ test('findWindowsTerminal: returns the resolved path when found', () => {
 
 test('findWindowsTerminal: does not throw', () => {
   assert.doesNotThrow(() => findWindowsTerminal({ runWhere: () => null }));
+});
+
+// --- The panes' starting directory (@AC10) --------------------------------
+// wt.exe does NOT inherit the caller's cwd the way `tmux new-session` does:
+// without `-d` a pane opens in the WT profile's startingDirectory, default
+// %USERPROFILE%. That is how Claude Code ended up running in the user's home
+// directory instead of their project. See features/windows-launcher.feature,
+// "Claude Code opens in the directory ccr was launched from".
+
+test('buildWtArgs: both panes are given the launch directory (@AC10)', () => {
+  const a = buildWtArgs({ ...baseArgsInput, cwd: 'C:\\work\\app' });
+  const sep = a.indexOf(';');
+  const before = a.slice(0, sep);
+  const after = a.slice(sep);
+
+  // Once per pane, and each `-d` inside its OWN pane's segment — a single -d
+  // before the separator would leave the sidecar in the profile default.
+  assert.strictEqual(a.filter((x) => x === '-d').length, 2, 'one -d per pane');
+  assert.strictEqual(before[before.indexOf('-d') + 1], 'C:\\work\\app');
+  assert.strictEqual(after[after.indexOf('-d') + 1], 'C:\\work\\app');
+
+  // -d is an option, so it must precede the pane's `cmd` payload.
+  assert.ok(before.indexOf('-d') < before.indexOf('cmd'), 'pane 0: -d before cmd');
+  assert.ok(after.indexOf('-d') < after.indexOf('cmd'), 'pane 1: -d before cmd');
+});
+
+test('buildWtArgs: a launch directory holding % is passed through unharmed (@AC10)', () => {
+  // % is legal in a Windows path and is NEVER seen by cmd here — -d's value is
+  // its own argv token. Reusing the cmd-payload validator (which rejects %)
+  // would refuse a perfectly valid directory, so this must not throw.
+  const a = buildWtArgs({ ...baseArgsInput, cwd: 'C:\\100%done' });
+  assert.strictEqual(a[a.indexOf('-d') + 1], 'C:\\100%done');
+});
+
+test('buildWtArgs: a launch directory wt cannot be given drops -d rather than failing (@AC10)', () => {
+  for (const hostile of [
+    'C:\\my;dir\\app',   // ; is wt's own pane separator, and legal in a path
+    'C:\\a"b\\app',      // " breaks wt's own parse
+  ]) {
+    const a = buildWtArgs({ ...baseArgsInput, cwd: hostile });
+    assert.strictEqual(a.includes('-d'), false, hostile);
+    // Still a complete two-pane launch — degraded, never refused.
+    assert.strictEqual(a.indexOf('new-tab'), 2);
+    assert.ok(a.includes('split-pane'));
+  }
+});
+
+test('buildWtArgs: no cwd means no -d at all', () => {
+  for (const none of [undefined, null, '']) {
+    assert.strictEqual(buildWtArgs({ ...baseArgsInput, cwd: none }).includes('-d'), false, String(none));
+  }
+});
+
+test('isWtPathSafe: accepts real Windows paths, rejects only what wt reparses', () => {
+  for (const ok of [
+    'C:\\work\\app',
+    'C:\\Program Files\\my app',   // spaces: Node quotes the token
+    'C:\\100%done',                // % is legal in a path and safe as an argv token
+    'C:\\Users\\John & Jane\\app', // & never reaches a shell here
+  ]) {
+    assert.strictEqual(isWtPathSafe(ok), true, ok);
+  }
+  for (const bad of ['C:\\my;dir', 'C:\\a"b', 'C:\\a\r\nb', '', null, undefined]) {
+    assert.strictEqual(isWtPathSafe(bad), false, String(bad));
+  }
 });
 
 // --- Adversarial quoting (the cmd /k payload) -----------------------------

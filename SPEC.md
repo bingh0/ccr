@@ -240,6 +240,7 @@ New behavior:
 | tmux feature (`launch.sh` / `ccr.tmux.conf`) | Windows Terminal equivalent | Status |
 |---|---|---|
 | `new-session` + `split-window -h -p 34` | `wt -w 0 new-tab ... ; split-pane -V -s 0.34 ...` | ✅ MVP |
+| `new-session` inherits `$PWD` — Claude opens where you ran `ccr` | `wt ... new-tab -d <cwd> ... ; split-pane -d <cwd> ...`. **wt does NOT inherit**: without `-d` a pane uses the WT *profile's* `startingDirectory` (default `%USERPROFILE%`). Free on tmux, which is why the first cut of this table omitted the row | ✅ §8.10 |
 | pane 0 runs `claude --settings` | `wt` pane 0 `cmd /c claude --settings <file>` | ✅ MVP |
 | pane 1 runs `ccr sidecar` | `wt` pane 1 `cmd /c node bin/ccr.js sidecar --exit-on-end` | ✅ MVP |
 | `export CCR_STATE_DIR` into panes (`set-environment`) | `cmd /c set CCR_STATE_DIR=...&& ...` per pane | ✅ MVP |
@@ -290,6 +291,12 @@ Claude Code, and Windows Terminal:
 9. `npm test` (the BDD harness) stays green; any new logic in `launch-win.js`
    that is pure (arg-building, profile validation) gets unit coverage. The
    non-Windows `launch.sh` path is unchanged.
+10. `ccr` run in a directory opens Claude Code **in that directory**, not in the
+    Windows Terminal profile's `startingDirectory`. Both panes receive it as
+    `wt ... -d <cwd>`. A directory wt cannot be given a starting directory for
+    (one containing `"` or `;`) still launches, warning where the panes landed
+    rather than refusing — `%` is legal in a Windows path and must pass through
+    unharmed, so the cmd-payload validator is NOT reused here.
 
 ---
 
