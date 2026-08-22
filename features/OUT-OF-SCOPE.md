@@ -115,7 +115,7 @@ an omission.
 The four that earn the tag: both escape-sequence scenarios, the unreadable-repo
 scenario, and the never-writes scenario.
 
-**Six link-fixture tests, and one ratified `@security` scenario, do not run on
+**Five link-fixture tests, and one ratified `@security` scenario, do not run on
 a Windows machine without Developer Mode.** `fs.symlinkSync` needs a privilege
 ordinary Windows users do not hold, and a symlink pointing at a FILE has no
 unprivileged equivalent there: a junction cannot target a file, and a hardlink

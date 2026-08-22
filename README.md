@@ -173,11 +173,11 @@ small JSON blob beside its own artifacts; you list that file's path in ccr's
 config; the sidebar cycles between the economy panel, the built-in git pane, and
 each configured pane.
 
-**Cycling views.** Under tmux the launcher binds **F3**. VS Code and its forks
-(Cursor, Positron, Antigravity) bind no key and leave both split panes running a
-foreground process, so the pasted sidecar one-liner carries `--keys`: click that
-pane and press **Space** (or **F3**). The renderer still reads no input — the key
-lives in a separate parent process that runs the panel as a child, the same
+**Cycling views.** Under tmux the launcher binds **F3** at the host. **Windows
+Terminal** binds no key of its own, and neither do VS Code and its forks (Cursor,
+Positron, Antigravity) — so on those the sidecar pane carries its own key: click
+the pane and press **Space** or **F3**. The renderer still reads no input — the
+key lives in a separate parent process that runs the panel as a child, the same
 separation tmux enforces. Anywhere else, `ccr cycle-view -i <name>` (or
 `--state-dir <dir>`); a bare `ccr cycle-view` resolves the instance from your
 working directory, like `ccr economy` does.
@@ -190,6 +190,19 @@ read from a repository:
 ```json
 { "panes": [ { "path": "/home/you/project/.your-tool/sidecar.json" } ] }
 ```
+
+A leading `~` expands, with either separator (`~/tools/blob.json`,
+`~\tools\blob.json`), and a relative path resolves against the config file's own
+directory. **On Windows, save the file as UTF-8** — `>` and `Out-File` in Windows
+PowerShell 5.1 write UTF-16, which is not JSON as far as any parser is concerned:
+
+```powershell
+Set-Content -Encoding utf8 $env:USERPROFILE\.config\ccr\config.json $json
+```
+
+`ccr doctor` reports what it read out of the config — the paths as **resolved**,
+not as written — and names the problem when there is one, so a pane that never
+appears is a question you can answer rather than a silence.
 
 A pane is a full-height view carrying the producing tool's own rows — here
 `gherkin-trace`, whose blob ships as the golden example:
