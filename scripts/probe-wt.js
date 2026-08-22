@@ -58,15 +58,29 @@ function mkdir(/** @type {string} */ p) {
 }
 
 /**
+ * A directory whose FULL path is exactly `n` characters. Returns null when the
+ * base is already too long to leave room, or when the final segment would be
+ * longer than a filename may be.
+ * @param {number} n
+ * @returns {string|null}
+ */
+function pathOfLength(n) {
+  const head = path.join(BASE, `len-${n}`);
+  const need = n - head.length - 1;            // -1 for the separator
+  return need >= 1 && need <= 255 ? path.join(head, 'x'.repeat(need)) : null;
+}
+
+/**
  * The fixtures. Each is a real directory except `missing`, which is the point.
  * @returns {Case[]}
  */
 function buildCases() {
   /** @type {Case[]} */
   const cases = [];
-  const add = (/** @type {string} */ id, /** @type {string} */ what, /** @type {string} */ dir, /** @type {string} */ note) => {
+  const add = (/** @type {string} */ id, /** @type {string} */ what, /** @type {string} */ dir, /** @type {string|null} */ note) => {
     const err = mkdir(dir);
-    cases.push(err ? { id, what, dir, note, skip: `could not create the fixture: ${err}` } : { id, what, dir, note });
+    const base = note ? { id, what, dir, note } : { id, what, dir };
+    cases.push(err ? { ...base, skip: `could not create the fixture: ${err}` } : base);
   };
 
   add('plain', 'an ordinary path', path.join(BASE, 'plain'), 'baseline — if this diverges, nothing else means anything');
@@ -74,6 +88,18 @@ function buildCases() {
   add('percent', 'a literal % in the name', path.join(BASE, '%USERNAME%-test'), 'does wt expand environment strings inside -d?');
   add('semicolon', 'a semicolon in the name', path.join(BASE, 'semi;colon'), 'wt splits its own command line on `;` — ccr refuses this today');
   add('backtick', 'a backtick in the name', path.join(BASE, 'back`tick'), 'ccr refuses this today; wt is not PowerShell, so the refusal may be unearned');
+
+  // Where exactly does the limit fall? The first run proved 299 characters
+  // costs the whole tab and that ~60 is fine, which leaves the guard ccr needs
+  // sitting anywhere in between. 248 (MAX_PATH minus the 12 the directory APIs
+  // historically reserve) and 260 (MAX_PATH itself) are both plausible, so the
+  // spread brackets them. The threshold ccr ships should come from this, not
+  // from what the documentation says the limit is — the documentation is about
+  // the filesystem, and the refusal here is Windows Terminal's.
+  for (const n of [240, 250, 256, 259, 261, 270]) {
+    const dir = pathOfLength(n);
+    if (dir) add(`len${n}`, `a path of exactly ${n} characters`, dir, null);
+  }
 
   // Past MAX_PATH. Creating it may itself fail when long paths are disabled,
   // which is a finding rather than an error — the case reports why and moves on.
@@ -83,9 +109,14 @@ function buildCases() {
 
   // UNC. The admin share needs elevation, so this reports as skipped rather
   // than failing the run — `net share probe=<dir>` and re-run is the way in.
-  const unc = '\\\\localhost\\c$\\Windows';
+  // NOT \\localhost\c$\Windows, which the first run used and which cannot
+  // answer the question: %SystemRoot% IS C:\Windows, so "cmd resolved the UNC
+  // to its local path" and "cmd refused the UNC and fell back to %SystemRoot%"
+  // produce byte-identical output. \Users has no such collision — reported as
+  // C:\Users it was resolved, reported as C:\Windows it was refused.
+  const unc = '\\\\localhost\\c$\\Users';
   cases.push(fs.existsSync(unc)
-    ? { id: 'unc', what: 'a UNC path', dir: unc, note: 'cmd.exe is believed to refuse a UNC cwd and fall back to %SystemRoot%' }
+    ? { id: 'unc', what: 'a UNC path', dir: unc, note: 'C:\\Users means cmd RESOLVED it (harmless); C:\\Windows means it refused and fell back' }
     : { id: 'unc', what: 'a UNC path', dir: unc, note: 'the hypothesis that matters most — it would be SILENT', skip: 'no access to \\\\localhost\\c$ (needs an elevated shell, or `net share probe=C:\\some\\dir` and edit this case)' });
 
   // Deliberately never created.
@@ -227,12 +258,20 @@ function main() {
     rows.push({ c, reported: r.reported, verdict: r.verdict });
   }
 
+  // A 270-character path in a markdown cell makes the whole table unreadable,
+  // and for a case whose entire point IS the length the full string says nothing
+  // the length does not. Middle-elided, with the count kept — a divergence still
+  // shows as a different head, tail or length.
+  const shortPath = (/** @type {string} */ v) => (v.length <= 64
+    ? v
+    : `${v.slice(0, 34)}…${v.slice(-16)} (${v.length} chars)`);
+
   console.log(`### \`wt -d\` probe — ${os.release()} / Windows Terminal\n`);
   console.log('| case | asked for | tab reported | verdict |');
   console.log('|---|---|---|---|');
   for (const { c, reported, verdict } of rows) {
     const cell = (/** @type {string} */ s) => String(s).replace(/\|/g, '\\|');
-    console.log(`| \`${c.id}\` — ${cell(c.what)} | \`${cell(c.dir)}\` | \`${cell(reported)}\` | ${cell(verdict)} |`);
+    console.log(`| \`${c.id}\` — ${cell(c.what)} | \`${cell(shortPath(c.dir))}\` | \`${cell(shortPath(reported))}\` | ${cell(verdict)} |`);
   }
   console.log('\n<details><summary>what each case is asking</summary>\n');
   for (const c of cases) if (c.note) console.log(`- \`${c.id}\`: ${c.note}`);
