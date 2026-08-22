@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Re-run the matrix against a commit that is already pushed. Needed because a
+  # push-triggered run cannot be replayed for a tree it never saw — which is
+  # exactly the hole a disabled workflow leaves behind when it is turned back on.
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
