@@ -21,6 +21,7 @@ Feature: Windows native launcher
     Then exactly one Windows Terminal window opens with two panes
     And the left pane runs Claude Code via `claude --settings <temp-file>`
     And the right pane runs `ccr sidecar` at approximately 34% width
+    And the sidecar pane reads its own cycle key
     And both panes receive CCR_STATE_DIR pointing at "~/.ccr/instances/1"
     And the process exits 0
 

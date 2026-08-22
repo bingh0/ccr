@@ -102,6 +102,17 @@ module.exports = function defineSidecarHotkeysSteps(reg) {
     w.stdin.type(keys.CYCLE_KEYS[0].repeat(Number(n)));
   });
 
+  // Named rather than indexed: a scenario that types CYCLE_KEYS[0] proves the
+  // list has a first element, not that a particular terminal can reach the view.
+  /** @type {Record<string, string>} */
+  const F3 = { SS3: '\x1bOR', 'linux-console': '\x1b[[C', 'csi-tilde': '\x1b[13~' };
+  reg.define(/^F3 arrives in the (\S+) encoding$/, (w, name) => {
+    const seq = F3[name];
+    assert.ok(seq, `no F3 sequence named ${name}`);
+    assert.ok(keys.CYCLE_KEYS.includes(seq), `${name} is not a cycle key`);
+    w.stdin.type(seq);
+  });
+
   reg.define(/^the key "([^"]+)" is pressed$/, (w, k) => { w.stdin.type(k); });
   reg.define(/^the interrupt key is pressed$/, (w) => { w.stdin.type(keys.INTERRUPT); });
   reg.define(/^the panel exits with code (\d+)$/, (w, code) => { w.child.fire('exit', Number(code), null); });

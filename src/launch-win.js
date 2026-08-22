@@ -321,7 +321,7 @@ function buildWtArgs(o) {
   const cols = sidecarCols(o.termCols, Number(frac), splitFlag);
   const sidecarBody =
     (cols != null ? `set "CCR_SIDECAR_COLS=${cols}"&& ` : '') +
-    `"${node}" "${ccrJs}" sidecar --exit-on-end`;
+    `"${node}" "${ccrJs}" sidecar --exit-on-end --keys`;
   const pane1 = paneCommand(stateDir, sidecarBody);
 
   // Both panes get the same starting directory, or neither does. `-d` sits

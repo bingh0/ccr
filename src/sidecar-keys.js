@@ -41,15 +41,28 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { cycleView } = require('./cycle-view');
 
-// F3 in the two encodings terminals actually send — SS3 on xterm and VS Code's
-// xterm.js, CSI on the Linux console — plus SPACE.
+// F3 in every encoding a terminal actually sends it, plus SPACE.
+//
+//   \x1bOR    SS3. What xterm, screen, tmux and vt220 all send (infocmp: kf3).
+//   \x1b[[C   The Linux console — infocmp gives `linux: kf3=\E[[C`, and it is
+//             the ONLY entry that differs. It is also what arrives on Windows
+//             from Node before v22.17.0 / v24.2.0: until "tty: use terminal VT
+//             mode on Windows" (db2aae802) setRawMode passed UV_TTY_MODE_RAW,
+//             where libuv translates the keypress itself rather than letting
+//             the terminal's own sequence through. From UV_TTY_MODE_RAW_VT on
+//             it sets ENABLE_VIRTUAL_TERMINAL_INPUT and Windows Terminal sends
+//             SS3 like everyone else. Which of the two arrives on Windows is
+//             therefore a property of the NODE VERSION, not the terminal.
+//   \x1b[13~  The CSI-tilde form VS Code's xterm.js sends. An earlier version
+//             of this comment called it the Linux console encoding; it is not,
+//             and the console form above was missing entirely.
 //
 // Space is not a fallback for tidiness: an editor that keeps F3 for its own
 // "find next" while the terminal is focused would otherwise leave this pane with
 // no key at all, and that behavior differs across VS Code, Cursor, Positron and
 // Antigravity. The pane is dedicated to the sidecar, so nothing else there is
 // waiting for a space.
-const CYCLE_KEYS = ['\x1bOR', '\x1b[13~', ' '];
+const CYCLE_KEYS = ['\x1bOR', '\x1b[[C', '\x1b[13~', ' '];
 
 // In raw mode Ctrl-C arrives as a BYTE, not a signal. Without handling it the
 // pane could not be closed from the keyboard at all.

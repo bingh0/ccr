@@ -31,6 +31,22 @@ Feature: Reaching every view on a host that binds no key
     When the cycle key is pressed 3 times in one burst
     Then the sidebar is asked to advance 3 views
 
+  # F3 has no single encoding, and on Windows which one arrives is a property of
+  # the NODE version rather than the terminal: Node only began setting
+  # ENABLE_VIRTUAL_TERMINAL_INPUT in v22.17.0 / v24.2.0, and before that libuv
+  # translated the keypress itself and sent the console form. A pane that
+  # answered only one encoding had no key at all on the others.
+  Scenario Outline: F3 reaches the sidebar in every encoding a terminal sends it
+    Given the sidecar is started with a key reader
+    When F3 arrives in the <encoding> encoding
+    Then the sidebar is asked to advance 1 view
+
+    Examples:
+      | encoding      |
+      | SS3           |
+      | linux-console |
+      | csi-tilde     |
+
   Scenario: A key the sidebar does not own is ignored
     Given the sidecar is started with a key reader
     When the key "x" is pressed

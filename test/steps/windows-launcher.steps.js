@@ -45,6 +45,13 @@ module.exports = function defineWindowsLauncherSteps(reg) {
   reg.define(/^the left pane runs Claude Code via `claude --settings <temp-file>`$/, (w) => {
     assert.match(panes(w.args).pane0, /claude --settings "/);
   });
+  // Windows Terminal binds no key of its own — tmux binds F3 at the host and
+  // the VS Code launcher appends --keys, but this launcher asked for neither,
+  // so every view past the first was unreachable here.
+  reg.define(/^the sidecar pane reads its own cycle key$/, (w) => {
+    assert.match(panes(w.args).pane1, /--keys/, 'the sidecar pane must host the cycle key');
+  });
+
   reg.define(/^the right pane runs `ccr sidecar` at approximately 34% width$/, (w) => {
     const p = panes(w.args);
     assert.match(p.pane1, /sidecar/);
