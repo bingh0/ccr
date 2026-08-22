@@ -30,13 +30,14 @@ unit layer underneath; features stay behavioral.
 | `statusline.feature` | `src/render/statusline.js` | design (plain-text statusLine contract) |
 | `transcripts.feature` | `src/transcripts.js` | design (shared transcript spine) |
 
-### Scoped, not yet built
+### Scoped 2026-08-04, since built
 
 These carry the reviewed acceptance criteria for the git pane, produced by a
-`/scope` interview on 2026-08-04 and confirmed by the visionary. They are listed
-in the `wip` register in `test/features.test.js`, so their scenarios show as TODO
-until steps bind — each basename must leave that list as it is built. The fence
-that goes with them is [`OUT-OF-SCOPE.md`](OUT-OF-SCOPE.md).
+`/scope` interview on 2026-08-04 and confirmed by the visionary. They entered
+the `wip` register in `test/wip-register.js` as declared debt and each
+basename left the list as its steps bound — both registers are empty today,
+so every scenario below runs and passes. The fence that goes with them is
+[`OUT-OF-SCOPE.md`](OUT-OF-SCOPE.md).
 
 | Feature file | Behavior |
 |---|---|
