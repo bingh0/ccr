@@ -293,7 +293,9 @@ test('every launcher records the launch directory', () => {
   // was launched from"). launch-vscode.js reads process.cwd() directly — its
   // host inherits the cwd, so there is nothing to keep in step.
   const expected = {
-    'launch-win.js': /d\.recordLaunchDir\(st\.stateDir, d\.cwd\)/,
+    // paneCwd, NOT d.cwd: the record must name the directory the panes were
+    // actually given, which is the whole content of "one source for both".
+    'launch-win.js': /d\.recordLaunchDir\(st\.stateDir, paneCwd\)/,
     'launch-vscode.js': /d\.recordLaunchDir\(st\.stateDir, process\.cwd\(\)\)/,
   };
   for (const [f, re] of Object.entries(expected)) {

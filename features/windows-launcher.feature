@@ -106,6 +106,17 @@ Feature: Windows native launcher
     When I run "ccr"
     Then stderr gives the reason "a semicolon"
 
+  # Declining to write the record is not enough. Slots are REUSED, and
+  # src/sidecar.js launchDir() prefers the record over the pane's own cwd, so a
+  # record left by whatever ran in this slot before would win outright — and the
+  # git pane would describe that session's repository instead of this one's.
+  @AC10
+  Scenario: A directory the panes never got leaves no launch record behind
+    Given ccr is run from the directory "C:\my;dir\app"
+    When I run "ccr"
+    Then no starting directory is given to Windows Terminal
+    And no launch directory is recorded
+
   @AC2
   Scenario: The default sidecar width honors CCR_SIDEBAR_PCT
     Given the environment sets CCR_SIDEBAR_PCT to "50"

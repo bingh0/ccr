@@ -104,6 +104,7 @@ function launcherDeps(world, opts = {}) {
     removeExited: (/** @type {string} */ dir) => { world.removedExited.push(dir); },
     // Recorded, not performed: the real one writes to the fake home.
     recordLaunchDir: (/** @type {string} */ dir, /** @type {string} */ cwd) => { world.recorded = { dir, cwd }; },
+    clearLaunchDir: (/** @type {string} */ dir) => { world.cleared = { dir }; },
     writeSettings: opts.writeSettings || ((s) => { world.written.push(s); return 'C:\\Temp\\ccr-settings-feat.json'; }),
     cleanup: (/** @type {string} */ f) => { world.cleaned.push(f); },
     spawnWt: (/** @type {string} */ wt, /** @type {string[]} */ args) => { world.spawns.push({ wt, args }); return { status: 0 }; },

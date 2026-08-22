@@ -323,8 +323,18 @@ function cmdResume(arg) {
  * @returns {number | undefined}
  */
 function cmdSidecar(stateDir, showHint, exitOnEnd, useKeys, view, target = null) {
-  if (!stateDir && target != null) {
-    // -i: attach to a live instance by name, through the resolution chain.
+  // Resolve whether or not -i was typed, which is what `ccr cycle-view` has
+  // always done. Consulting the chain ONLY for -i meant a bare `ccr sidecar`
+  // skipped every other link in it — including the one that matters most here,
+  // "the live instance whose launch directory contains the cwd" — and landed on
+  // the CONTAINER (~/.ccr) instead. The container holds no session, so the pane
+  // sat empty next to a running instance, and the fix looked like naming the
+  // instance exactly right when the whole point of the chain is not having to.
+  //
+  // --hint is left out: it prints the VS Code split instructions, which are
+  // worth printing before any instance exists, so requiring a live one to
+  // explain how to start one would be backwards.
+  if (!stateDir && !showHint) {
     const res = require('../src/instance-resolve').resolveInstance({ target, command: 'sidecar' });
     if (!res.ok) { process.stderr.write(res.error + '\n'); return 1; }
     stateDir = res.stateDir;

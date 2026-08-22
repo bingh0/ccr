@@ -35,6 +35,8 @@ function makeDeps(o = {}) {
     removeExited: [],
     /** @type {{ dir: string, cwd: string }[]} */
     recordLaunchDir: [],
+    /** @type {{ dir: string }[]} */
+    clearLaunchDir: [],
     /** @type {string[]} */
     cleanup: [],
     writeSettings: 0,
@@ -68,6 +70,7 @@ function makeDeps(o = {}) {
     })),
     removeExited: (d) => calls.removeExited.push(d),
     recordLaunchDir: (dir, cwd) => calls.recordLaunchDir.push({ dir, cwd }),
+    clearLaunchDir: (dir) => calls.clearLaunchDir.push({ dir }),
     writeSettings: o.writeSettings || (() => { calls.writeSettings++; return 'C:\\Temp\\ccr-settings-x.json'; }),
     cleanup: (f) => calls.cleanup.push(f),
     spawnWt: o.spawnWt || ((wt, args) => { calls.spawnWt.push({ wt, args }); return { status: 0 }; }),
@@ -187,8 +190,15 @@ test('run: a directory wt cannot be given still launches, and says so (@AC10)', 
   assert.match(msg, /my;dir/, 'the directory is named');
   assert.match(msg, /default directory/, 'and where the panes will land instead');
 
-  // The record still holds the true launch dir — only wt could not be told.
-  assert.strictEqual(calls.recordLaunchDir[0].cwd, 'C:\\my;dir\\app');
+  // This used to assert the opposite — "the record still holds the true launch
+  // dir, only wt could not be told" — which is the divergence written down as a
+  // requirement. src/sidecar.js launchDir() PREFERS the record over the pane's
+  // own cwd, so a record naming a directory the panes are not in is not a
+  // harmless leftover: it is what makes the git pane describe the wrong repo.
+  assert.deepStrictEqual(calls.recordLaunchDir, [], 'no record for a directory the panes never got');
+  // And CLEARED, not merely skipped: slots are reused, so a record left by the
+  // previous session in this slot would otherwise win.
+  assert.strictEqual(calls.clearLaunchDir.length, 1, 'the stale record is cleared');
 });
 
 test('run: unknown profile errors, lists available, no spawn (@AC6)', () => {

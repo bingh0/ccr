@@ -361,7 +361,7 @@ function defaultWhere(name) {
 
 const inject = require('./settings-inject');
 const slots = require('./instance-slot');
-const { ensureSecureDir, recordLaunchDir } = require('./state-dir');
+const { ensureSecureDir, recordLaunchDir, clearLaunchDir } = require('./state-dir');
 
 /**
  * Fill in real-environment implementations for anything the caller didn't
@@ -380,10 +380,12 @@ function withDefaults(deps) {
     // The launcher's own stdout reports the live terminal width — the sidecar's
     // does not, inside its cmd /c pane (see sidecarCols). undefined on non-TTY.
     cols: deps.cols != null ? deps.cols : process.stdout.columns,
-    // The launch directory, injected like every other external effect. It
-    // feeds BOTH the recorded launch dir (the tab's identity for the git pane)
-    // and wt's `-d`, so the pane and the record can never disagree about where
-    // this session is. process.cwd() throws only if the cwd has been deleted.
+    // The launch directory, injected like every other external effect. It is
+    // the INPUT to that decision, not the answer: run() narrows it to paneCwd —
+    // the directory wt will actually be given — and both the record and `-d`
+    // read that, so the pane and the record cannot disagree about where this
+    // session is. This comment claimed the invariant before the code held it.
+    // process.cwd() throws only if the cwd has been deleted.
     cwd: deps.cwd != null ? deps.cwd : (() => {
       try { return process.cwd(); } catch { return null; }
     })(),
@@ -397,6 +399,7 @@ function withDefaults(deps) {
     listDir: deps.listDir || defaultListDir,
     ensureDir: deps.ensureDir || ensureSecureDir,
     recordLaunchDir: deps.recordLaunchDir || recordLaunchDir,
+    clearLaunchDir: deps.clearLaunchDir || clearLaunchDir,
     allocateSlot: deps.allocateSlot || ((o) => slots.allocateSlot(o)),
     prepareInstance: deps.prepareInstance
       || ((/** @type {{slot:number,stateDir:string}} */ s, /** @type {any} */ o) =>
@@ -514,9 +517,24 @@ function run(profile, deps = {}, opts = {}) {
 
   // 4. Prepare the per-profile state dir; clear a stale sentinel.
   try { d.ensureDir(st.stateDir); } catch { /* best effort */ }
-  // The tab's stable identity for the git pane. Recorded here because only the
-  // launcher knows where ccr was started (src/state-dir.js).
-  if (d.cwd) try { d.recordLaunchDir(st.stateDir, d.cwd); } catch { /* best effort */ }
+  // ONE source for both consumers: the directory the panes will ACTUALLY start
+  // in. Everything below reads paneCwd — the record that gives the git pane its
+  // identity, and wt's `-d` — so the two cannot describe different directories.
+  //
+  // Recording d.cwd unconditionally is what CREATED the divergence rather than
+  // merely failing to prevent it: src/sidecar.js launchDir() PREFERS the record
+  // over the pane's own cwd. readGitRepo self-heals after Claude's first status
+  // tick, but before that tick — the state every tab starts in — the pane draws
+  // the project's repo, branch, tree and history in full confidence for a
+  // session sitting somewhere else entirely.
+  const paneCwd = isWtPathSafe(d.cwd) ? d.cwd : null;
+  if (paneCwd) {
+    try { d.recordLaunchDir(st.stateDir, paneCwd); } catch { /* best effort */ }
+  } else {
+    // Clearing, not skipping. Slots are reused, so the record from whatever ran
+    // in this slot before would otherwise win (src/state-dir.js clearLaunchDir).
+    try { d.clearLaunchDir(st.stateDir); } catch { /* best effort */ }
+  }
   d.removeExited(st.stateDir);
 
   // The panes must open where `ccr` was run. wt does not inherit that, so it
@@ -548,7 +566,7 @@ function run(profile, deps = {}, opts = {}) {
       sidebarSide: d.env.CCR_SIDEBAR_SIDE || DEFAULT_SIDEBAR_SIDE,
       termCols: d.cols,
       title: inst ? inst.title : undefined,
-      cwd: d.cwd,
+      cwd: paneCwd,
     });
   } catch (e) {
     d.err(`ccr: ${e instanceof Error ? e.message : String(e)}\n`);
@@ -582,6 +600,7 @@ function run(profile, deps = {}, opts = {}) {
  * @property {(dir: string) => string[]} listDir
  * @property {(dir: string) => void} ensureDir
  * @property {(dir: string, cwd: string) => void} recordLaunchDir
+ * @property {(dir: string) => void} clearLaunchDir
  * @property {(o: {profile?: string, env: NodeJS.ProcessEnv, home: string}) => ({slot: number, session: string, stateDir: string, attached: boolean}|{exhausted: true}|null)} allocateSlot
  * @property {(slot: {slot: number, stateDir: string}, o: {profile?: string, name?: string|null}) => {name: string, title: string}} prepareInstance
  * @property {(dir: string) => void} removeExited

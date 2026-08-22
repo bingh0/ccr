@@ -61,4 +61,21 @@ function recordLaunchDir(dir, cwd) {
   } catch { /* best effort */ }
 }
 
-module.exports = { ensureSecureDir, recordLaunchDir };
+/**
+ * Forget the recorded launch directory.
+ *
+ * NOT the same as declining to write one. Slots are REUSED, so a record left by
+ * whatever ran in this slot before would still be sitting there — and
+ * src/sidecar.js launchDir() PREFERS the record over the pane's own cwd, so a
+ * stale one wins outright. The launcher calls this whenever it could not
+ * deliver the directory to the panes, which is the only moment it knows the
+ * record would be a lie.
+ *
+ * @param {string} dir  The state directory.
+ */
+function clearLaunchDir(dir) {
+  const path = require('node:path');
+  try { fs.rmSync(path.join(dir, 'launch-cwd'), { force: true }); } catch { /* best effort */ }
+}
+
+module.exports = { ensureSecureDir, recordLaunchDir, clearLaunchDir };

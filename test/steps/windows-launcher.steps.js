@@ -73,6 +73,10 @@ module.exports = function defineWindowsLauncherSteps(reg) {
     assert.strictEqual(pane0[pane0.indexOf('-d') + 1], dir, 'pane 0 starting directory');
     assert.strictEqual(pane1[pane1.indexOf('-d') + 1], dir, 'pane 1 starting directory');
   });
+  reg.define(/^no launch directory is recorded$/, (w) => {
+    assert.ok(!w.recorded, 'nothing may be recorded for a directory the panes never got');
+    assert.ok(w.cleared, 'and any record from a previous session in this slot must be cleared');
+  });
   reg.define(/^the recorded launch directory is "([^"]+)"$/, (w, dir) => {
     assert.ok(w.recorded, 'the launch directory was recorded');
     assert.strictEqual(w.recorded.cwd, dir);
