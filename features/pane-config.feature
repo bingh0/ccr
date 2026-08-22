@@ -89,6 +89,19 @@ Feature: Pane blob discovery through user configuration
     Then the configured pane is read from it as normal
     And no configuration error is reported
 
+  Scenario: A configuration saved as UTF-16 blames the encoding, not the JSON
+    # The likelier Windows mistake, and NOT the one the BOM strip catches.
+    # Windows PowerShell 5.1 writes UTF-16LE for `>` and Out-File by default —
+    # Set-Content writes ANSI, only `-Encoding utf8` produces the UTF-8 BOM, and
+    # PowerShell 7+ writes UTF-8 without one. Read as UTF-8 those bytes survive
+    # trimming and reach the parser as NUL-interleaved text, so the parse fails
+    # and "not valid JSON" sends someone hunting a syntax error in a file whose
+    # syntax is perfectly fine.
+    Given a configuration file saved as UTF-16
+    When the sidecar loads its pane configuration
+    Then no panes are configured
+    And the configuration error is named as "looks like UTF-16 — save it as UTF-8"
+
   # --- A bad config costs the panes, never the panel ---
 
   @security

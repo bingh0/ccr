@@ -129,6 +129,16 @@ module.exports = function definePaneConfigSteps(reg) {
   reg.define(/^a configuration file saved with a UTF-8 byte-order mark$/, (w) => {
     withConfig(w, '\uFEFF' + JSON.stringify({ panes: [{ path: '/tools/blob.json' }] }));
   });
+  reg.define(/^a configuration file saved as UTF-16$/, (w) => {
+    // Written as BYTES: the point is the encoding, so a JS string would test
+    // nothing. UTF-16LE with a BOM is what `>` and Out-File produce on
+    // Windows PowerShell 5.1.
+    w.configDir = w.configDir || tmp(w);
+    w.configFile = path.join(w.configDir, 'config.json');
+    const body = JSON.stringify({ panes: [{ path: '/tools/blob.json' }] });
+    fs.writeFileSync(w.configFile, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(body, 'utf16le')]));
+    w.env = { CCR_CONFIG: w.configFile };
+  });
   reg.define(/^the configured pane is read from it as normal$/, (w) => {
     assert.deepStrictEqual(w.result.panes.map((/** @type {any} */ p) => p.source), ['/tools/blob.json']);
   });

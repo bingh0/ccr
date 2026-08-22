@@ -108,6 +108,18 @@ function loadPaneConfig(opts = {}) {
   // is whitespace to the trimmer but not to the parser.)
   const text = raw.replace(/^\uFEFF/, '');
 
+  // UTF-16 is the likelier Windows mistake, and it is NOT what the strip above
+  // catches. Windows PowerShell 5.1 writes UTF-16LE for `>` and `Out-File` by
+  // default (Set-Content writes ANSI; only `-Encoding utf8` gives the UTF-8 BOM;
+  // PowerShell 7+ writes UTF-8 without one). Read as UTF-8 those bytes survive
+  // trim() and reach the parser as a leading U+FFFD pair and NUL-interleaved
+  // text, so the parse fails and the honest-looking report is "not valid JSON"
+  // — sending someone to hunt for a syntax error in a file whose syntax is
+  // fine. A NUL is never content in a JSON config, so it names the real cause.
+  if (text.includes('\u0000')) {
+    return { ...empty, error: 'looks like UTF-16 — save it as UTF-8' };
+  }
+
   let parsed;
   try { parsed = JSON.parse(text); } catch { return { ...empty, error: 'not valid JSON' }; }
   if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.panes)) {
