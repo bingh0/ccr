@@ -35,6 +35,12 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+// Find wt exactly the way ccr does — `where wt` then `where wt.exe`, spawning
+// the RESOLVED path. A bare 'wt' relies on the child process doing its own PATH
+// search, and wt.exe is installed as an App Execution Alias rather than an
+// ordinary file on PATH. If ccr cannot find it, the probe should fail the same
+// way ccr does rather than differently.
+const { findWindowsTerminal } = require('../src/launch-win');
 
 const KEEP = process.argv.includes('--keep');
 const BASE = path.join(os.tmpdir(), 'ccr-wt-probe');
@@ -89,16 +95,33 @@ function buildCases() {
 
 /** Where a case writes what it found. */
 const outFile = (/** @type {Case} */ c) => path.join(OUT, `${c.id}.txt`);
+/** The one-line script the tab runs. */
+const batFile = (/** @type {Case} */ c) => path.join(OUT, `${c.id}.bat`);
+
+/**
+ * Put the redirect in a FILE rather than on wt's command line. wt parses its
+ * own trailing commandline — it splits on `;`, and the quoting rules for a
+ * nested `cmd /c "cd > ..."` are its business, not ours. A mangled redirect
+ * would produce no output file, which this probe would then report as "no tab"
+ * — the one verdict that must not be wrong, since it is the one that would say
+ * do not ship. So the tab runs a path, and nothing else.
+ * @param {Case} c
+ */
+function writeBat(c) {
+  fs.writeFileSync(batFile(c), `@echo off\r\ncd > "${outFile(c)}"\r\n`);
+}
 
 /**
  * Open one tab whose whole job is to record where it started.
  * `wt` returns as soon as it has handed off, so a 0 exit says nothing about
  * whether the tab ran — only the output file does.
  * @param {Case} c
+ * @param {string} wt resolved path to wt.exe
  * @returns {string|null} spawn-level error, if the launcher itself refused
  */
-function launch(c) {
-  const r = spawnSync('wt', ['-w', '0', 'new-tab', '-d', c.dir, 'cmd', '/c', `cd > "${outFile(c)}"`], {
+function launch(c, wt) {
+  writeBat(c);
+  const r = spawnSync(wt, ['-w', '0', 'new-tab', '-d', c.dir, 'cmd', '/c', batFile(c)], {
     encoding: 'utf8', windowsHide: false,
   });
   if (r.error) return r.error.message;
@@ -147,18 +170,38 @@ function classify(c, launchError, fileContent) {
     : { kind: 'diverged', reported, verdict: '**DIVERGED**' };
 }
 
+/** Remove the fixtures, reporting rather than throwing: see the note above. */
+function cleanup() {
+  try {
+    fs.rmSync(BASE, { recursive: true, force: true });
+    return true;
+  } catch (e) {
+    console.error(`probe-wt: could not remove ${BASE} — ${e instanceof Error ? e.message : String(e)}`);
+    console.error('probe-wt: (harmless; the long-path fixture resists deletion. Delete it by hand if you like.)');
+    return false;
+  }
+}
+
 function main() {
   if (process.platform !== 'win32') {
-    console.error('probe-wt: this measures Windows Terminal, so it only means anything on Windows.');
-    console.error(`probe-wt: (you are on ${process.platform})`);
+    // Exit 0 deliberately: there is nothing here to measure, which is not the
+    // same as failing. A non-zero exit makes `npm run` print an error wall, and
+    // "cannot run here" then reads as "crashed".
+    console.log('probe-wt: this measures Windows Terminal, so it only means anything on Windows.');
+    console.log(`probe-wt: (you are on ${process.platform} — run it on the Windows box instead)`);
+    return 0;
+  }
+  const wt = findWindowsTerminal();
+  if (!wt) {
+    console.error('probe-wt: wt.exe not found — install Windows Terminal:');
+    console.error('          winget install Microsoft.WindowsTerminal');
     return 2;
   }
-  if (spawnSync('where', ['wt'], { encoding: 'utf8' }).status !== 0) {
-    console.error('probe-wt: wt.exe not found on PATH — install Windows Terminal (winget install Microsoft.WindowsTerminal).');
-    return 2;
-  }
+  console.log(`probe-wt: using ${wt}`);
 
-  fs.rmSync(BASE, { recursive: true, force: true });
+  // A previous run leaves a >MAX_PATH directory behind, and that is exactly the
+  // kind of path Windows refuses to delete. Never let cleanup fail the run.
+  cleanup();
   mkdir(OUT);
   const cases = buildCases();
 
@@ -167,7 +210,7 @@ function main() {
   const launchErrors = {};
   for (const c of cases) {
     if (c.skip) continue;
-    const err = launch(c);
+    const err = launch(c, wt);
     if (err) launchErrors[c.id] = err;
   }
   collect(cases);
@@ -209,11 +252,24 @@ function main() {
   if (!noTab && !diverged) console.log('**No divergence.** Every honoured `-d` landed where it was asked to.');
   console.log('\nPaste this table into https://github.com/bingh0/ccr/issues/6');
 
-  if (!KEEP) fs.rmSync(BASE, { recursive: true, force: true });
+  if (!KEEP) cleanup();
   else console.log(`\n(fixtures kept at ${BASE})`);
   return 0;
 }
 
-if (require.main === module) process.exit(main());
+if (require.main === module) {
+  let code = 1;
+  try {
+    code = main();
+  } catch (e) {
+    // A diagnostic that dies with a bare stack trace tells the person running
+    // it nothing they can act on, and they are running it as a favour.
+    console.error('\nprobe-wt: stopped on an unexpected error. This is a bug in the probe,');
+    console.error('          not a result — please paste everything below into the issue.\n');
+    console.error(e instanceof Error ? (e.stack || e.message) : String(e));
+    console.error(`\n  node ${process.version} on ${process.platform} ${os.release()}`);
+  }
+  process.exit(code);
+}
 
 module.exports = { classify, samePath, buildCases, BASE };
