@@ -1,5 +1,21 @@
 # ccr Windows fast release — engineering spec
 
+> **Historical. This is a plan, not a contract.**
+>
+> Written before the native Windows launcher existed, to decide how to build it.
+> That work shipped in 0.2.0 and has moved since — §4 and §5 describe files and
+> functions as they were going to be, not as they are.
+>
+> **`features/` is the contract.** Where this document and the executable
+> specification disagree, the feature files win, and so does shipped behaviour
+> that a maintainer has signed off. Sections have been corrected in passing
+> (#3, #4) but nothing keeps this file in step, so a correction landing here is
+> luck rather than process — do not read an omission as a decision, and do not
+> remove a shipped behaviour because this file does not mention it.
+>
+> Kept because §2 is still the record of *why* Windows Terminal, and what was
+> rejected on the way — the part no feature file carries.
+
 **Goal:** make `ccr` (and `ccr <profile>`) launch a live, side-by-side sidecar on
 native Windows — Claude Code in one pane, `ccr sidecar` in another — without WSL,
 without breaking the zero-dependency / no-config-mutation contract.

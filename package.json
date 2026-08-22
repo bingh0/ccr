@@ -25,6 +25,7 @@
     "scripts/launch.sh",
     "sidecar",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
