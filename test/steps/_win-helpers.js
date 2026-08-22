@@ -44,16 +44,34 @@ const append = (/** @type {string} */ f, /** @type {string[]} */ lines) =>
  * @param {string[]} args
  */
 function panes(args) {
-  const sep = args.indexOf(';');
-  const firstCmd = args.indexOf('cmd'); // pane 0's payload follows the first `cmd /c`
+  // Read by CONTENT, never by offset. The previous version took pane payloads
+  // at fixed distances from `;` and from the first `cmd`, and the split flag and
+  // fraction at +2 and +4 from the separator — which meant the order of
+  // PRODUCTION argv was constrained by this helper's arithmetic. Move a flag and
+  // the helper does not fail, it silently reads a different token and the
+  // scenarios keep passing while asserting the wrong thing.
+  //
+  // Each payload is whatever follows a `cmd /c` pair, in the order wt receives
+  // them: pane 0 is the first, the sidecar pane the second.
+  const payloads = [];
+  for (let i = 0; i < args.length - 1; i += 1) {
+    if (args[i] === 'cmd' && args[i + 1] === '/c') payloads.push(args[i + 2]);
+  }
+  /** The token after a flag, wherever the flag sits. */
+  const after = (/** @type {string} */ flag) => {
+    const i = args.indexOf(flag);
+    return i === -1 ? undefined : args[i + 1];
+  };
   return {
-    pane0: args[firstCmd + 2],
-    pane1: args[args.length - 1],
-    splitFlag: args[sep + 2],
-    frac: args[sep + 4],
+    pane0: payloads[0],
+    pane1: payloads[1],
+    // The split direction is its own token, so match on the token rather than
+    // on where it happens to fall relative to the separator.
+    splitFlag: args.find((/** @type {string} */ t) => t === '-H' || t === '-V'),
+    frac: after('-s'),
     hasNewTab: args.includes('new-tab'),
-    hasSplit: args[sep + 1] === 'split-pane',
-    targetsCurrentWindow: args[0] === '-w' && args[1] === '0',
+    hasSplit: args.includes('split-pane'),
+    targetsCurrentWindow: after('-w') === '0',
   };
 }
 

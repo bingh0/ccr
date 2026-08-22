@@ -119,6 +119,22 @@ function wtPathProblem(dir) {
 }
 
 /**
+ * What the user could DO about it, when there is anything.
+ *
+ * Only the UNC case has an answer: cmd.exe will take a mapped drive letter
+ * where it refuses the UNC form, so the directory is reachable — just not by
+ * that name. The other causes are the path they have, and telling someone to
+ * rename their project or shorten it below 256 characters is not advice.
+ *
+ * @param {string|null|undefined} dir
+ * @returns {string|null}
+ */
+function wtPathHint(dir) {
+  if (typeof dir !== 'string' || !/^[\\/]{2}/.test(dir)) return null;
+  return 'map the share to a drive letter (net use Z: \\\\server\\share) and run ccr from there';
+}
+
+/**
  * @param {string|null|undefined} dir
  * @returns {boolean} true if `dir` can be passed to wt.exe as `-d <dir>`
  */
@@ -546,6 +562,8 @@ function run(profile, deps = {}, opts = {}) {
     d.err(`ccr: cannot open the panes in ${d.cwd}\n`);
     d.err(`     the path ${pathProblem}\n`);
     d.err("     — they will open in Windows Terminal's default directory instead.\n");
+    const hint = wtPathHint(d.cwd);
+    if (hint) d.err(`     ${hint}.\n`);
   }
 
   // 5. Inject statusLine via a temp settings FILE (avoids CLI JSON quoting).
@@ -617,6 +635,7 @@ module.exports = {
   isWtArgSafe,
   isWtPathSafe,
   wtPathProblem,
+  wtPathHint,
   WT_PATH_MAX,
   resolveProfileState,
   sidebarFraction,

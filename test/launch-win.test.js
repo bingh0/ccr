@@ -296,6 +296,34 @@ test('isWtPathSafe: accepts real Windows paths, rejects only what wt reparses', 
   assert.strictEqual(isWtPathSafe('C:\\back`tick\\app'), true, 'a backtick is legal in -d');
 });
 
+test('the argv helper reads by content, so production order is not its business', () => {
+  // _win-helpers panes() used to read the split flag and fraction at fixed
+  // offsets from `;`. wt accepts `split-pane -s 0.34 -V` and
+  // `split-pane -V -s 0.34` identically, and under the old helper the second
+  // form reported splitFlag "-s" and frac "-V" — WRONG, and silently so: every
+  // scenario using it kept passing while asserting nonsense. That is the shape
+  // of the problem, not a hypothetical: it makes the order of production argv
+  // answerable to test bookkeeping.
+  const { panes } = require('./steps/_win-helpers');
+  const built = buildWtArgs({
+    ccCmd: 'claude', settingsFile: 'C:\\s.json', stateDir: 'C:\\st',
+    node: 'node', ccrJs: 'C:\\ccr.js', cwd: 'C:\\work', sidebarPct: 34, sidebarSide: 'right',
+  });
+  const swapped = built.slice();
+  swapped.splice(swapped.indexOf('-V'), 1);
+  swapped.splice(swapped.indexOf('-s') + 2, 0, '-V');
+
+  /** @type {Array<[string, string[]]>} */
+  const cases = [['as built', built], ['flags swapped', swapped]];
+  for (const [label, args] of cases) {
+    const p = panes(args);
+    assert.strictEqual(p.frac, '0.34', `${label}: fraction`);
+    assert.strictEqual(p.splitFlag, '-V', `${label}: split direction`);
+    assert.ok(p.hasSplit, `${label}: the split is seen`);
+    assert.match(String(p.pane1), /sidecar/, `${label}: the sidecar pane is the second payload`);
+  }
+});
+
 test('wtPathProblem: the limits wt actually has, and a reason naming each one', () => {
   const under = 'C:\\' + 'x'.repeat(WT_PATH_MAX - 3);
   assert.strictEqual(under.length, WT_PATH_MAX);

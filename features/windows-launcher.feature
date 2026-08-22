@@ -95,6 +95,11 @@ Feature: Windows native launcher
     When I run "ccr"
     Then no starting directory is given to Windows Terminal
     And stderr gives the reason "UNC path"
+    # The only degrade case with an answer. cmd.exe takes a mapped drive letter
+    # where it refuses the UNC form, so the directory IS reachable — just not by
+    # that name. Telling someone to shorten a path below 256 characters or
+    # rename their project is not advice, so the other causes get no hint.
+    And stderr gives the reason "net use Z:"
     And the process exits 0
 
   # The message used to name `" or ;` whatever the cause, including causes that
