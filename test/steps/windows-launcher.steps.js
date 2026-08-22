@@ -73,6 +73,14 @@ module.exports = function defineWindowsLauncherSteps(reg) {
   reg.define(/^no starting directory is given to Windows Terminal$/, (w) => {
     assert.strictEqual(w.args.includes('-d'), false, 'no -d in the argv');
   });
+  reg.define(/^ccr is run from a directory of (\d+) characters$/, (w, n) => {
+    const head = 'C:\\long\\';
+    w.cwd = head + 'x'.repeat(Number(n) - head.length);
+    assert.strictEqual(w.cwd.length, Number(n), 'the fixture must be exactly that long');
+  });
+  reg.define(/^stderr gives the reason "([^"]+)"$/, (w, fragment) => {
+    assert.ok(w.err.includes(fragment), `expected stderr to name "${fragment}", got:\n${w.err}`);
+  });
   reg.define(/^stderr explains the panes open in the default directory$/, (w) => {
     assert.match(w.err, /default directory/);
   });

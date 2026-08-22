@@ -58,6 +58,53 @@ Feature: Windows native launcher
     And exactly one Windows Terminal window opens with two panes
     And the process exits 0
 
+  # Everything below was MEASURED on Windows 11 with scripts/probe-wt.js rather
+  # than reasoned about. None of it is reachable from CI: every test injects
+  # spawnWt, so the suite proves the argv ccr builds and nothing about what
+  # Windows Terminal does when handed it.
+
+  # A backtick was refused for years on the theory that wt might reparse it. It
+  # does not — wt is not PowerShell. The tab landed exactly where it was asked,
+  # so the refusal was costing a launch that would have worked.
+  @AC10
+  Scenario: A launch directory containing a backtick is passed through unharmed
+    Given ccr is run from the directory "C:\back`tick\app"
+    When I run "ccr"
+    Then both panes are given the starting directory "C:\back`tick\app"
+
+  # Past 256 characters Windows Terminal opens NO TAB AT ALL — not a tab in the
+  # wrong place, no tab. That is worse than the bug `-d` exists to fix, so a
+  # path that long takes the same degrade route as an unpassable character.
+  @AC10
+  Scenario: A launch directory too long for Windows Terminal still launches
+    Given ccr is run from a directory of 300 characters
+    When I run "ccr"
+    Then no starting directory is given to Windows Terminal
+    And stderr gives the reason "300 characters"
+    And exactly one Windows Terminal window opens with two panes
+    And the process exits 0
+
+  # The silent one, and the reason the whole measurement was worth doing. The
+  # tab OPENS for a UNC directory — cmd.exe just refuses a UNC working directory
+  # and starts in %SystemRoot% without a word. Unhandled, the git pane draws the
+  # project's repository in full confidence for a terminal sitting in C:\Windows.
+  @AC10
+  Scenario: A UNC launch directory still launches, and is not passed silently
+    Given ccr is run from the directory "\\server\share\app"
+    When I run "ccr"
+    Then no starting directory is given to Windows Terminal
+    And stderr gives the reason "UNC path"
+    And the process exits 0
+
+  # The message used to name `" or ;` whatever the cause, including causes that
+  # are neither — a path rejected for a carriage return was told it held a
+  # semicolon. It names what actually matched now.
+  @AC10
+  Scenario: The message names the reason this directory could not be used
+    Given ccr is run from the directory "C:\my;dir\app"
+    When I run "ccr"
+    Then stderr gives the reason "a semicolon"
+
   @AC2
   Scenario: The default sidecar width honors CCR_SIDEBAR_PCT
     Given the environment sets CCR_SIDEBAR_PCT to "50"

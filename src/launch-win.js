@@ -57,14 +57,73 @@ function isWtArgSafe(value) {
 // says where the panes landed (features/windows-launcher.feature, "A launch
 // directory Windows Terminal cannot be given still launches"). Refusing to
 // start over a legal directory name would trade one broken launch for another.
-const WT_PATH_UNSAFE_RE = /["`;\r\n]/;
+//
+// MEASURED on Windows 11 (10.0.26200) with scripts/probe-wt.js, because none of
+// this was knowable from the documentation and none of it is covered by CI —
+// every test injects spawnWt, so the suite proves the argv and nothing about
+// what Windows Terminal does with it.
+const WT_PATH_UNSAFE_RE = /[";\r\n]/;
+
+// The backtick used to be in that class and is NOT: a path containing one was
+// passed through and the tab landed exactly where it was asked to. wt is not
+// PowerShell. Refusing it cost a launch that would have worked.
+//
+// The semicolon earns its place — wt splits its own command line on it, and a
+// path containing one opens NO TAB AT ALL.
+
+// Longest path wt will accept as `-d`. Measured: 256 characters opens a tab,
+// 259 opens none — so the true limit is 257 or 258, and 256 is the longest
+// length known to work. Two characters of headroom is not worth another round
+// trip on someone else's machine.
+//
+// This is NOT the filesystem's limit. The machine that measured it has long
+// paths enabled: a 299-character directory was created successfully and then
+// refused a tab. The refusal is Windows Terminal's.
+const WT_PATH_MAX = 256;
+
+// Naming the character rather than echoing it. Two reasons: a raw CR or LF
+// interpolated into a diagnostic would break the diagnostic, and "a semicolon"
+// is what the reader needs anyway — they are looking at the path already.
+/** @type {Record<string, string>} */
+const WT_PATH_CHAR_NAMES = {
+  '"': 'a double quote',
+  ';': 'a semicolon',
+  '\r': 'a carriage return',
+  '\n': 'a newline',
+};
+
+/**
+ * Why `dir` cannot be given to wt as `-d`, or null when it can.
+ *
+ * Every branch here degrades rather than refuses to launch: the panes open in
+ * Windows Terminal's default directory and stderr says so. The point of the
+ * REASON is that "we would not pass this one" is a different sentence for each
+ * cause, and the previous single message named characters the path did not
+ * contain.
+ *
+ * @param {string|null|undefined} dir
+ * @returns {string|null} a clause completing "the path …", or null if usable
+ */
+function wtPathProblem(dir) {
+  if (typeof dir !== 'string' || dir.length === 0) return 'is not a directory ccr could read';
+  // UNC is the dangerous one, and the only case here that is SILENT. The tab
+  // OPENS — cmd.exe simply refuses a UNC working directory and starts in
+  // %SystemRoot% without a word. Measured: \\localhost\c$\Users reported
+  // C:\Windows. Left unhandled, the git pane would describe the project in
+  // full confidence for a terminal sitting in C:\Windows.
+  if (/^[\\/]{2}/.test(dir)) return 'is a UNC path — cmd.exe refuses those and starts in %SystemRoot% without saying so';
+  if (dir.length > WT_PATH_MAX) return `is ${dir.length} characters — Windows Terminal opens no tab at all past ${WT_PATH_MAX}`;
+  const m = WT_PATH_UNSAFE_RE.exec(dir);
+  if (m) return `contains ${WT_PATH_CHAR_NAMES[m[0]] || 'a character'} — Windows Terminal parses it and opens no tab at all`;
+  return null;
+}
 
 /**
  * @param {string|null|undefined} dir
  * @returns {boolean} true if `dir` can be passed to wt.exe as `-d <dir>`
  */
 function isWtPathSafe(dir) {
-  return typeof dir === 'string' && dir.length > 0 && !WT_PATH_UNSAFE_RE.test(dir);
+  return wtPathProblem(dir) === null;
 }
 
 // Upstream default split: the sidecar gets ~34% of the width.
@@ -464,9 +523,10 @@ function run(profile, deps = {}, opts = {}) {
   // is passed explicitly below; when the directory cannot be passed the launch
   // still goes ahead, and saying so is the whole difference between a surprise
   // and a known limitation.
-  if (d.cwd && !isWtPathSafe(d.cwd)) {
+  const pathProblem = d.cwd ? wtPathProblem(d.cwd) : null;
+  if (pathProblem) {
     d.err(`ccr: cannot open the panes in ${d.cwd}\n`);
-    d.err('     the path contains a character Windows Terminal parses (" or ;)\n');
+    d.err(`     the path ${pathProblem}\n`);
     d.err("     — they will open in Windows Terminal's default directory instead.\n");
   }
 
@@ -537,6 +597,8 @@ module.exports = {
   validateProfile,
   isWtArgSafe,
   isWtPathSafe,
+  wtPathProblem,
+  WT_PATH_MAX,
   resolveProfileState,
   sidebarFraction,
   sidebarSplitFlag,

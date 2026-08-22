@@ -18,6 +18,8 @@ const {
   buildWtArgs,
   findWindowsTerminal,
   isWtPathSafe,
+  wtPathProblem,
+  WT_PATH_MAX,
 } = require('../src/launch-win.js');
 
 test('validateProfile: accepts safe identifiers', () => {
@@ -289,6 +291,35 @@ test('isWtPathSafe: accepts real Windows paths, rejects only what wt reparses', 
   for (const bad of ['C:\\my;dir', 'C:\\a"b', 'C:\\a\r\nb', '', null, undefined]) {
     assert.strictEqual(isWtPathSafe(bad), false, String(bad));
   }
+  // Measured, not assumed: a backtick is passed through and the tab lands where
+  // asked. wt is not PowerShell (scripts/probe-wt.js, Windows 11 10.0.26200).
+  assert.strictEqual(isWtPathSafe('C:\\back`tick\\app'), true, 'a backtick is legal in -d');
+});
+
+test('wtPathProblem: the limits wt actually has, and a reason naming each one', () => {
+  const under = 'C:\\' + 'x'.repeat(WT_PATH_MAX - 3);
+  assert.strictEqual(under.length, WT_PATH_MAX);
+  assert.strictEqual(wtPathProblem(under), null, `${WT_PATH_MAX} characters is the longest that opens a tab`);
+  // 259 opened no tab on the measured machine; 257 and 258 were never probed,
+  // so the guard sits at the longest length known to work.
+  const over = under + 'y';
+  assert.match(String(wtPathProblem(over)), /characters/, 'too long is named as a length');
+  assert.ok(!/semicolon|quote/.test(String(wtPathProblem(over))), 'and not as a character');
+
+  // The silent case: the tab OPENS for a UNC path and lands in %SystemRoot%.
+  for (const unc of ['\\\\server\\share\\app', '//server/share/app']) {
+    assert.match(String(wtPathProblem(unc)), /UNC/, unc);
+  }
+
+  // The message names the character that actually matched. It used to say
+  // `" or ;` for every cause, so a path rejected for a carriage return was
+  // told it contained a semicolon.
+  assert.match(String(wtPathProblem('C:\\a;b')), /semicolon/);
+  assert.match(String(wtPathProblem('C:\\a"b')), /double quote/);
+  assert.match(String(wtPathProblem('C:\\a\rb')), /carriage return/);
+  assert.match(String(wtPathProblem('C:\\a\nb')), /newline/);
+  // And never echoes the character itself — a raw CR in a diagnostic breaks it.
+  assert.ok(!String(wtPathProblem('C:\\a\rb')).includes('\r'), 'the reason must not contain a control character');
 });
 
 // --- Adversarial quoting (the cmd /k payload) -----------------------------
