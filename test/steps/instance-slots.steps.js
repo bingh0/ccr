@@ -251,7 +251,7 @@ module.exports = function defineInstanceSlotsSteps(reg) {
     snapshot(dirOf(w, Number(n)), Number(five));
   });
 
-  reg.define(/^slot (\d+)'s meters are reconciled from disk$/, (w) => {
+  reg.define(/^slot (?:\d+)'s meters are reconciled from disk$/, (w) => {
     w.merged = freshenAccountLimits(w.localRl, w.localDir, { home: home(w) });
   });
 

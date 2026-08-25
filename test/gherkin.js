@@ -1,7 +1,7 @@
 // @ts-check
 // test/gherkin.js
 //
-// Vendored copy of gherkin-node-test@0.9.0 (MIT — github.com/bingh0/gherkin-node-test,
+// Vendored copy of gherkin-node-test@0.11.0 (MIT — github.com/bingh0/gherkin-node-test,
 // npm: gherkin-node-test). That package is the canonical source; this copy is kept
 // in-tree so ccr's acceptance suite runs on a bare `node --test` with zero install,
 // preserving the zero-runtime-dependency story. When the parser changes, change it
@@ -157,9 +157,9 @@ function methodRegister(t, title, opts, fn) {
  * test function. Only the one-runFeatures-call-per-file guard is bypassed —
  * see runFeatures for why it is native-runner-only.
  * @param {any} testFn a `test` function with `.skip` and `.todo` methods
- * @returns {{ runFeature: (parsed: ParsedFeature, registry: StepRegistry) => void,
- *             runFeatureFile: (file: string, registry: StepRegistry) => void,
- *             runFeatures: (dir: string, definers: Record<string, (reg: StepRegistry) => any>, opts?: { wip?: Iterable<WipEntry>, manifest?: string }) => void }}
+ * @returns {{ runFeature: (parsed: ParsedFeature, registry: StepRegistry<any>) => void,
+ *             runFeatureFile: (file: string, registry: StepRegistry<any>) => void,
+ *             runFeatures: (dir: string, definers: Record<string, Definer<any>>, opts?: { wip?: Iterable<WipEntry>, manifest?: string }) => void }}
  */
 function bindRunner(testFn) {
   if (typeof testFn !== 'function' || typeof testFn.skip !== 'function' || typeof testFn.todo !== 'function') {
@@ -243,7 +243,33 @@ function currentTestFile() {
 /** @typedef {{ name: string, line: number, rows: number, header: string[], headerLine: number, placeholders: string[] }} OutlineMeta */
 /** @typedef {{ line: number, text: string, inBody: boolean }} NarrativeLine */
 /** @typedef {{ feature: string, featureLine: number, background: Step[], scenarios: Scenario[], outlines: OutlineMeta[], narrative: NarrativeLine[], file: string }} ParsedFeature */
-/** @typedef {(world: Record<string, any>, ...args: any[]) => (void | Promise<void>)} StepFn */
+/**
+ * A step implementation. `W` is the world's ACCRETED shape — what the steps
+ * build up over a scenario, not a constructor contract: the world is born
+ * `{}`, so a field in `W` proves its key is spelled consistently, never that
+ * a step has assigned it yet. Enforced by the consumer's own type-check, not
+ * by the runner — the runtime guards below owe nothing to it. Args arrive as
+ * the regex capture strings plus, when the step has a table, a trailing
+ * DataTable — typed as the union because that is what actually arrives; a
+ * captured number is a string until the step coerces it.
+ * @template [W=Record<string, any>]
+ * @typedef {(world: W & { defer(fn: (world: W) => (void | Promise<void>)): void }, ...args: (string | DataTable)[]) => (void | Promise<void>)} StepFn
+ */
+/**
+ * A step-definer module: receives a feature's scoped registry, defines its
+ * steps. The annotation seam for typed worlds — `Definer<MyWorld>` is how a
+ * definer passed to runFeatures gets a typed `world` without a cast.
+ * `unknown` return, deliberately: define() returns `this`, and definers
+ * routinely trail-return the registry by accident.
+ * @template [W=Record<string, any>]
+ * @typedef {(reg: StepRegistry<W>) => unknown} Definer
+ */
+/**
+ * The instance type of a (possibly typed) registry, exported so consumers of
+ * the `export =` entry never have to spell `InstanceType<typeof StepRegistry>`.
+ * @template [W=Record<string, any>]
+ * @typedef {StepRegistry<W>} Registry
+ */
 
 /**
  * Thrown when a feature file uses syntax this parser does not support, or a
@@ -973,17 +999,308 @@ const STRICT_TAG_MESSAGE = {
   '@only': 'tag "@only" has no place in reviewed output — focus is a per-run flag (--test-name-pattern / -t / --filter), never a committed edit; remove the tag',
 };
 
+// --- The step-definition lint -------------------------------------------------
+//
+// lintFeature's companion, aimed at the other side of the contract: the step
+// definition source. One default rule, `unearned-absence` (ratified
+// 2026-08-25 on the six-corpus measurement — see docs/lint-admission.md),
+// fires on absence assertions whose needle is a string or regex LITERAL:
+// the unfalsifiable class, where a wrong needle goes green forever. A
+// needle the suite itself produced (an identifier) is structurally
+// controlled and stays out of the default. `rest-signature` rides along per
+// its own ruling: the runner exempts rest-form callbacks from the
+// args-consumption guard, so the lint records each one as a sighting.
+//
+// Sanction is a statement-attached marker naming its rule and its prover:
+//   // step-lint: allow unearned-absence -- guarded: the positive assertion above proves the needle
+// A marker without a reason sanctions nothing; a marker whose rule does not
+// fire on its statement is itself a finding (`stale-marker`). Markers
+// attach to STATEMENTS, not lines — the scan joins wrapped statements
+// (method-chain continuations rejoin tight) so a formatter's re-wrapping
+// can neither detach a marker nor hide a negation.
+//
+// Pure text-in/findings-out, warn-class, never a gate. Scan-root coverage
+// is the caller's job — the one field incident behind this rule came from
+// negation lines OUTSIDE the lint's roots, so scan everything your steps
+// import.
+
+// The unearned-absence forms: literal-needle negations across every
+// assertion dialect in use. `LIT` requires a quote or a regex literal in
+// the matcher argument — an identifier-only needle never matches.
+const STEP_LINT_NEGATION_FORMS = [
+  /\.not\.(?:toContain|toMatch)\(\s*["'`/]/,
+  // Literal second argument only: an identifier needle is a value the
+  // suite produced, and a trailing string is a failure MESSAGE, not a
+  // needle (adversarial review 2026-08-25, findings 3 and 4).
+  /assert\.doesNotMatch\([^,]*,\s*["'`/]/,
+  /\.ok\(\s*!.*\.(?:includes|match|test)\(\s*["'`]/,
+  /\.ok\(\s*!\s*\/.*\/[a-z]*\.test\(/,
+  /assert\.notStrictEqual\([^,]*,\s*["'`][^"'`]*["'`]\s*[,)]/,
+  /\?\..*\.not\.toBe\(\s*["'`]/,
+];
+
+// Any parameter list carrying a rest parameter after the world, followed by
+// an arrow or a function body — define-call, function-form, and
+// wrapper-defined rest all sight (adversarial review 2026-08-25, finding 7;
+// spread-call false positives are structurally unlikely: a call's argument
+// list is not followed by `=>` or `{`).
+const STEP_LINT_REST_FORM = /\(\s*[\w$]+\s*,[^()]*\.\.\.[^()]*\)\s*(?:=>|\{)/;
+
+const STEP_LINT_MARKER = /step-lint:\s*allow\s+([a-z-]+)(?:\s*--\s*(\S.*))?/;
+
+// A marker RULES only as a comment's own leading content; the same text
+// nested inside another comment marker, or quoted anywhere, is MENTION —
+// documentation showing the grammar must not trip the grammar (pre-release
+// review, finding 9: the lint could not document itself).
+const STEP_LINT_MARKER_USE = /^\s*(?:\/\/|\/\*|\*)\s*step-lint:/;
+const STEP_LINT_TRAILING_USE = /^\/\/\s*step-lint:/;
+
+/**
+ * Group source lines into logical statements — the sanctioning unit.
+ *
+ * Braces are CONTAINERS, never joiners: a line that opens a block is a
+ * complete header statement and resets the continuation carry, so the
+ * canonical `module.exports = (reg) => { … }` wrapper can never collapse a
+ * definer body into one statement (adversarial review 2026-08-25, the
+ * CRITICAL finding — a marker anywhere in the body sanctioned everything).
+ * Continuation depth counts parens and brackets only; string and template
+ * state carries across lines; regex literals and trailing comments are
+ * skipped by the standard preceded-by heuristic. Markers are read from
+ * COMMENT text only — a marker inside a string literal is fixture data,
+ * not a ruling — and a reasoned marker that ends up attached to nothing
+ * (a blank line between it and its statement, or nothing following) is
+ * returned as an orphan so the caller can say so loudly: a sanction that
+ * silently evaporates is the exact silence this lint exists to refuse.
+ * Comment-shaped lines are exempt from scanning per the line-shape lesson
+ * (lexing without parser context desyncs; this lint's false-positive path
+ * is loud). Two known misreads, both loud-direction: the interior lines of
+ * a multi-line template literal scan as code (a negation in template TEXT
+ * false-fires visibly), and a keyword-preceded regex (`return /x/.test(y)`)
+ * reads as division, which can merge statements but never silently pass
+ * one that carries no marker.
+ * @param {string} text
+ * @returns {{ statements: { line: number, code: string, markers: { rule: string, reason: string | null, line: number }[] }[],
+ *             orphans: { rule: string, reason: string | null, line: number }[] }}
+ */
+function stepLintStatements(text) {
+  const lines = text.split('\n');
+  /** @type {{ line: number, code: string, markers: { rule: string, reason: string | null, line: number }[] }[]} */
+  const statements = [];
+  /** @type {{ rule: string, reason: string | null, line: number }[]} */
+  const orphans = [];
+  /** @type {{ rule: string, reason: string | null, line: number }[]} */
+  let pendingMarkers = [];
+  /** @type {{ line: number, code: string, markers: { rule: string, reason: string | null, line: number }[] } | null} */
+  let current = null;
+  let depth = 0;
+  let quote = '';
+  const flush = () => { if (current) { statements.push(current); current = null; } };
+
+  // One line's code portion and structure: trailing-comment text split off,
+  // paren/bracket delta, brace opens/closes, quote state carried in/out.
+  const scan = (/** @type {string} */ raw) => {
+    let d = 0;
+    let opens = 0;
+    let closes = 0;
+    let codeEnd = raw.length;
+    let trailing = '';
+    let prev = '';
+    /** @type {[number, number][]} */
+    const excised = [];
+    for (let i = 0; i < raw.length; i++) {
+      const c = raw[i];
+      if (quote) {
+        if (c === '\\') { i++; continue; }
+        if (c === quote) quote = '';
+        continue;
+      }
+      if (c === "'" || c === '"' || c === '`') { quote = c; continue; }
+      if (c === '/' && raw[i + 1] === '/') { codeEnd = i; trailing = raw.slice(i); break; }
+      if (c === '/' && raw[i + 1] === '*') {
+        const e = raw.indexOf('*/', i + 2);
+        if (e === -1) { codeEnd = i; break; }
+        // Excised from the scanned code: an inline block comment (a JSDoc
+        // param annotation, typically) must not break a form's shape — a
+        // JSDoc'd rest parameter is still a rest parameter.
+        excised.push([i, e + 2]);
+        i = e + 1;
+        continue;
+      }
+      if (c === '/' && (prev === '' || /[=(\[{,;:!&|?+\-*%~^<>]/.test(prev))) {
+        let inClass = false;
+        for (i++; i < raw.length; i++) {
+          const r = raw[i];
+          if (r === '\\') { i++; continue; }
+          if (inClass) { if (r === ']') inClass = false; continue; }
+          if (r === '[') inClass = true;
+          else if (r === '/') break;
+        }
+        prev = '/';
+        continue;
+      }
+      if ('(['.includes(c)) d++;
+      else if (')]'.includes(c)) d--;
+      else if (c === '{') opens++;
+      else if (c === '}') closes++;
+      if (!/\s/.test(c)) prev = c;
+    }
+    if (quote === "'" || quote === '"') quote = ''; // plain strings never span lines
+    let codeStr = raw.slice(0, codeEnd);
+    for (let k = excised.length - 1; k >= 0; k--) {
+      const [from, to] = excised[k];
+      if (from < codeEnd) codeStr = codeStr.slice(0, from) + ' ' + codeStr.slice(Math.min(to, codeEnd));
+    }
+    return { code: codeStr, trailing, delta: d, opens, closes };
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    const trimmed = raw.trimStart();
+    const inTemplate = quote === '`';
+    const isComment = !inTemplate
+      && (trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*'));
+    if (isComment) {
+      const m = STEP_LINT_MARKER_USE.test(raw) ? STEP_LINT_MARKER.exec(raw) : null;
+      if (m) {
+        const entry = { rule: m[1], reason: m[2] ? m[2].trim() : null, line: i + 1 };
+        if (current) current.markers.push(entry);
+        else pendingMarkers.push(entry);
+      }
+      continue;
+    }
+    if (!trimmed) {
+      if (!current) {
+        for (const m of pendingMarkers) if (m.reason !== null) orphans.push(m);
+        pendingMarkers = [];
+      }
+      continue;
+    }
+    const { code, trailing, delta, opens, closes } = scan(raw);
+    const codeTrim = code.trim();
+    const joinsChain = codeTrim.startsWith('.');
+    if (current && (depth > 0 || joinsChain)) {
+      current.code += joinsChain ? codeTrim : ` ${codeTrim}`;
+    } else {
+      flush();
+      current = { line: i + 1, code: codeTrim, markers: pendingMarkers };
+      pendingMarkers = [];
+    }
+    const tm = trailing && STEP_LINT_TRAILING_USE.test(trailing) ? STEP_LINT_MARKER.exec(trailing) : null;
+    if (tm && current) current.markers.push({ rule: tm[1], reason: tm[2] ? tm[2].trim() : null, line: i + 1 });
+    depth = Math.max(0, depth + delta);
+    if (opens !== closes) {
+      // Block boundary: the header (or closer) is complete, and inner lines
+      // start fresh — the container never joins its contents.
+      flush();
+      depth = 0;
+    } else if (depth === 0) {
+      const next = lines[i + 1];
+      if (!(next && next.trimStart().startsWith('.'))) flush();
+    }
+  }
+  flush();
+  for (const m of pendingMarkers) if (m.reason !== null) orphans.push(m);
+  return { statements, orphans };
+}
+
+/**
+ * Lint step-definition source for hollow-binding text shapes. Same finding
+ * shape as lintFeature — `{ rule, severity, line, message }[]`, sorted by
+ * line, all warn-class. `config.rules` adds `{ pattern, reason }` pairs;
+ * all config rules share the rule name `custom`, so one `allow custom`
+ * marker sanctions every config rule firing on that statement — a
+ * documented granularity limit.
+ * @param {string} text step-definition source
+ * @param {string} [filename] used only to prefix messages
+ * @param {{ rules?: { pattern: RegExp | string, reason: string }[] }} [config]
+ * @returns {{ rule: string, severity: 'warn', line: number, message: string }[]}
+ */
+function lintStepDefinitionSource(text, filename = '<steps>', config = {}) {
+  /** @type {{ rule: string, severity: 'warn', line: number, message: string }[]} */
+  const findings = [];
+  const custom = (config.rules || []).map((r) => ({
+    pattern: r.pattern instanceof RegExp ? r.pattern : new RegExp(r.pattern),
+    reason: r.reason,
+  }));
+  const { statements, orphans } = stepLintStatements(text);
+  for (const m of orphans) {
+    findings.push({
+      rule: 'stale-marker', severity: 'warn', line: m.line,
+      message: `${filename}:${m.line}: marker names "${m.rule}" but sanctions nothing — a blank line `
+        + '(or the end of the file) separates it from any statement; attach it to the statement it '
+        + 'rules, or delete it. A ruling that silently evaporates is the silence this lint refuses',
+    });
+  }
+  for (const stmt of statements) {
+    /** @type {Set<string>} */
+    const fired = new Set();
+    const sanctioned = (/** @type {string} */ rule) =>
+      stmt.markers.some((m) => m.rule === rule && m.reason !== null);
+    const excerpt = stmt.code.length > 60 ? `${stmt.code.slice(0, 60)}…` : stmt.code;
+    if (STEP_LINT_NEGATION_FORMS.some((re) => re.test(stmt.code))) {
+      fired.add('unearned-absence');
+      if (!sanctioned('unearned-absence')) {
+        findings.push({
+          rule: 'unearned-absence', severity: 'warn', line: stmt.line,
+          message: `${filename}:${stmt.line}: absence over a literal needle — \`${excerpt}\` is `
+            + 'unfalsifiable when the needle is wrong: the search finds nothing, the line stays green, '
+            + 'and what it denies may be present under different words. Prove the needle can fire (a '
+            + 'control run, a same-scope positive, or a typed predicate), rewrite in the positive '
+            + 'direction, or sanction: // step-lint: allow unearned-absence -- <what proves the needle>',
+        });
+      }
+    }
+    if (STEP_LINT_REST_FORM.test(stmt.code)) {
+      fired.add('rest-signature');
+      if (!sanctioned('rest-signature')) {
+        findings.push({
+          rule: 'rest-signature', severity: 'warn', line: stmt.line,
+          message: `${filename}:${stmt.line}: rest-form step callback — the runner exempts it from the `
+            + 'args-consumption guard (Function.length lies for rest), so this signature no longer '
+            + 'declares what it consumes. Record the ruling: // step-lint: allow rest-signature -- '
+            + '<why this step takes whatever arrives>',
+        });
+      }
+    }
+    for (const c of custom) {
+      if (!c.pattern.test(stmt.code)) continue;
+      fired.add('custom');
+      if (sanctioned('custom')) continue;
+      findings.push({
+        rule: 'custom', severity: 'warn', line: stmt.line,
+        message: `${filename}:${stmt.line}: \`${excerpt}\` — ${c.reason} Sanction: `
+          + '// step-lint: allow custom -- <what makes this instance sound>',
+      });
+    }
+    for (const m of stmt.markers) {
+      if (m.reason !== null && !fired.has(m.rule)) {
+        findings.push({
+          rule: 'stale-marker', severity: 'warn', line: m.line,
+          message: `${filename}:${m.line}: marker names "${m.rule}" but the rule does not fire on `
+            + 'this statement — the ruling has outlived its subject; delete the marker, or restore '
+            + 'what it sanctioned',
+        });
+      }
+    }
+  }
+  return findings.sort((a, b) => a.line - b.line);
+}
+
 // --- Step registry ----------------------------------------------------------
 
+/**
+ * @template [W=Record<string, any>] the world this registry's steps share —
+ *   see StepFn for what `W` does and does not prove
+ */
 class StepRegistry {
   constructor() {
-    /** @type {{ re: RegExp, fn: StepFn }[]} */
+    /** @type {{ re: RegExp, fn: StepFn<W> }[]} */
     this.steps = [];
   }
 
   /**
    * @param {RegExp | string} pattern RegExp (capture groups become step args) or exact string
-   * @param {StepFn} fn
+   * @param {StepFn<W>} fn
    * @returns {this}
    */
   define(pattern, fn) {
@@ -994,15 +1311,153 @@ class StepRegistry {
 
   /**
    * @param {string} text
-   * @returns {{ fn: StepFn, args: string[] } | null}
+   * @returns {{ fn: StepFn<W>, args: string[], re: RegExp } | null}
    */
   find(text) {
     for (const s of this.steps) {
       const m = text.match(s.re);
-      if (m) return { fn: s.fn, args: m.slice(1) };
+      if (m) return { fn: s.fn, args: m.slice(1), re: s.re };
     }
     return null;
   }
+}
+
+// --- The args-consumption guard ----------------------------------------------
+//
+// The ratified convention (2026-08-24, gh#4 item (a)): a step callback
+// declares exactly what its sentence produces — the world, then one plain
+// positional parameter per capture and per data table. Rest-form is the
+// sanctioned "I take whatever" (exempt here, sighted by the companion lint);
+// a non-capturing group is the sanctioned "varies but unconsumed"; defaults
+// have no place in a step signature. The check runs at INVOKE time — tables
+// are appended only then, and `Function.length` lies for rest-style callbacks
+// — which also means its reach follows execution: a body that never runs
+// (@skip, an execution filter, an unbound todo) is never checked.
+
+/** @type {WeakMap<Function, { rest: boolean, dflt: string | null, declared: number } | null>} */
+const signatureCache = new WeakMap();
+
+/**
+ * Parse a step callback's parameter list from its source. Returns null when
+ * the source is unreadable (native/bound functions) — the guard fails open
+ * there rather than guessing. `declared` counts step parameters (world
+ * excluded); `dflt` is the first defaulted parameter's name, because a
+ * default makes `Function.length` stop counting: an honest signature would
+ * read as under-consuming, and on a zero-capture step the default hides
+ * entirely — which is why defaults are refused on sight, not counted.
+ * @param {Function} fn
+ * @returns {{ rest: boolean, dflt: string | null, declared: number } | null}
+ */
+function analyzeSignature(fn) {
+  if (signatureCache.has(fn)) return signatureCache.get(fn) ?? null;
+  const src = String(fn);
+  /** @type {{ rest: boolean, dflt: string | null, declared: number } | null} */
+  let result = null;
+  if (!src.includes('[native code]')) {
+    /** @type {string[] | null} */
+    let params = null;
+    const paren = src.indexOf('(');
+    const arrow = src.indexOf('=>');
+    if (arrow !== -1 && (paren === -1 || arrow < paren)) {
+      // Bare-identifier arrow: `w => …` — one parameter, no default, no rest.
+      const name = src.slice(0, arrow).replace(/^async\s+/, '').trim();
+      params = name ? [name] : [];
+    } else if (paren !== -1) {
+      let depth = 0;
+      let end = -1;
+      for (let i = paren; i < src.length; i++) {
+        const c = src[i];
+        if (c === '(') depth++;
+        else if (c === ')') { depth--; if (depth === 0) { end = i; break; } }
+        // Unterminated comments cannot appear in a syntactically valid
+        // function, but the scan must be total anyway: a failed skip ends
+        // the scan (end stays -1 → fail open) instead of cycling.
+        else if (c === '/' && src[i + 1] === '*') {
+          const close = src.indexOf('*/', i);
+          if (close === -1) break;
+          i = close + 1;
+        } else if (c === '/' && src[i + 1] === '/') {
+          const nl = src.indexOf('\n', i);
+          if (nl === -1) break;
+          i = nl;
+        } else if (c === "'" || c === '"' || c === '`') {
+          const q = c;
+          for (i++; i < src.length && src[i] !== q; i++) if (src[i] === '\\') i++;
+        }
+      }
+      if (end !== -1) {
+        const span = src.slice(paren + 1, end)
+          .replace(/\/\*[\s\S]*?\*\//g, '')
+          .replace(/\/\/[^\n]*/g, '');
+        params = [];
+        let cur = '';
+        let d = 0;
+        for (const ch of span) {
+          if ('([{'.includes(ch)) d++;
+          else if (')]}'.includes(ch)) d--;
+          if (ch === ',' && d === 0) { params.push(cur.trim()); cur = ''; continue; }
+          cur += ch;
+        }
+        if (cur.trim()) params.push(cur.trim());
+      }
+    }
+    if (params) {
+      let rest = false;
+      /** @type {string | null} */
+      let dflt = null;
+      for (const p of params) {
+        if (p.startsWith('...')) { rest = true; continue; }
+        let d = 0;
+        for (let i = 0; i < p.length; i++) {
+          const c = p[i];
+          if ('([{'.includes(c)) d++;
+          else if (')]}'.includes(c)) d--;
+          else if (c === '=' && d === 0 && p[i + 1] !== '>' && p[i + 1] !== '='
+            && p[i - 1] !== '=' && p[i - 1] !== '!' && p[i - 1] !== '<' && p[i - 1] !== '>') {
+            if (!dflt) dflt = p.slice(0, i).trim();
+            break;
+          }
+        }
+      }
+      result = { rest, dflt, declared: Math.max(0, params.length - 1) };
+    }
+  }
+  signatureCache.set(fn, result);
+  return result;
+}
+
+/**
+ * The refusal message for one invocation, or null. `produced` is what this
+ * invocation carries (captures, plus its data table as one argument).
+ * @param {Step} step
+ * @param {{ fn: Function, re: RegExp }} found
+ * @param {number} produced
+ * @returns {string | null}
+ */
+function consumptionError(step, found, produced) {
+  const sig = analyzeSignature(found.fn);
+  if (!sig) return null; // unreadable source — fail open, never guess
+  if (sig.dflt) {
+    return `step "${step.text}": definition ${found.re} defaults parameter "${sig.dflt}" — a step `
+      + 'argument always arrives, so a default only hides drift (and Function.length stops counting '
+      + 'at it); declare the parameter plainly, or take rest (w, ...args)';
+  }
+  if (sig.rest) return null; // the sanctioned "I take whatever" — lint-sighted, not refused
+  if (produced === sig.declared) return null;
+  if (produced > sig.declared) {
+    // The table is appended last, so an under-consuming table step always
+    // drops it — the worst variant, named as such.
+    const table = step.table
+      ? (produced - sig.declared === 1 ? ' — its data table would be silently dropped'
+        : ' — including its data table, silently dropped')
+      : '';
+    return `step "${step.text}" produced ${produced} argument(s) but definition ${found.re} declares `
+      + `${sig.declared} parameter(s) after the world${table}; consume what the sentence `
+      + 'parameterizes, make the unconsumed group(s) non-capturing (?:…), or declare rest (w, ...args)';
+  }
+  return `step "${step.text}" produced ${produced} argument(s) but definition ${found.re} declares `
+    + `${sig.declared} parameter(s) after the world — the extra parameter(s) would be undefined on `
+    + 'every run; remove them, or capture in the pattern what they should receive';
 }
 
 // --- Snippets ----------------------------------------------------------------
@@ -1072,10 +1527,11 @@ function ambiguityError(steps, registry) {
  * failing assertion can't leak temp dirs/processes. The step failure, if any,
  * outranks cleanup errors; with no step failure the first cleanup error throws.
  * (`defer` is a reserved key on the world.)
+ * @template [W=Record<string, any>]
  * @param {Step[]} steps
- * @param {StepRegistry} registry
- * @param {Record<string, any>} [world]
- * @returns {Promise<Record<string, any>>}
+ * @param {StepRegistry<W>} registry
+ * @param {W} [world]
+ * @returns {Promise<W>}
  */
 async function executeSteps(steps, registry, world = {}) {
   // Ambiguity preflight, before ANY step runs: a step matching two bindings
@@ -1101,6 +1557,11 @@ async function executeSteps(steps, registry, world = {}) {
         throw new Error(`Undefined step: ${step.text}\nDefine it with:\n${buildSnippet(step.text)}`);
       }
       const args = step.table ? [...found.args, new DataTable(step.table)] : found.args;
+      // The args-consumption guard, per invocation: what this step produced
+      // against what the signature declares (see consumptionError). Checked
+      // before the body runs — a refused binding must not half-execute.
+      const refusal = consumptionError(step, found, args.length);
+      if (refusal) throw new Error(refusal);
       await found.fn(world, ...args);
     }
   } catch (e) {
@@ -1136,8 +1597,9 @@ async function executeSteps(steps, registry, world = {}) {
  * own per-run flag instead: `node --test --test-name-pattern <re>`,
  * `bun test -t <re>`, or `deno test --filter <text>` — a CLI argument can't be
  * committed into the suite, which is the point.
+ * @template [W=Record<string, any>]
  * @param {ParsedFeature} parsed
- * @param {StepRegistry} registry
+ * @param {StepRegistry<W>} registry
  * @param {typeof registerTest} [register] test-registration hook; supplied by
  *   bindRunner, defaults to the runtime's native runner
  * @param {ManifestRecorder | null} [recorder] run-manifest recorder; supplied
@@ -1163,6 +1625,36 @@ function runFeature(parsed, registry, register = registerTest, recorder = null) 
       throw new Error(
         `${parsed.file}: duplicate scenario title(s): ${list} — the title is how one scenario is `
         + 'focused (--test-name-pattern / -t / --filter) and how failures are reported; rename the copies apart');
+    });
+  }
+  // Third rejection, same additive shape: a definition no scenario consumes
+  // is dead code in the step layer — the wip ratchet's dual (wip catches
+  // scenarios without definitions; this catches definitions without
+  // scenarios). Consumption is counted HERE, at registration, in a pass of
+  // its own: every scenario counts — @skip'd, @todo'd, and wip-held rows
+  // included — because registration runs under every execution filter, and
+  // the count must not ride along inside the unbound-step filter below
+  // (full evaluation is incidental there; an early-exit rewrite would
+  // silently stop counting for wip-held rows while both stayed green). A
+  // definition matched by an ambiguous step still counts as consumed:
+  // ambiguity carries its own refusal, and the remedy here must stay
+  // unique — delete the definition, or write the scenario it serves.
+  const consumed = new Set();
+  for (const sc of parsed.scenarios) {
+    for (const step of [...parsed.background, ...sc.steps]) {
+      for (const def of registry.steps) {
+        if (step.text.match(def.re)) consumed.add(def);
+      }
+    }
+  }
+  const unused = registry.steps.filter((d) => !consumed.has(d));
+  if (unused.length) {
+    const list = unused.map((d) => String(d.re)).join('; ');
+    register(`${base} :: every definition has a consumer`, {}, () => {
+      throw new Error(
+        `${parsed.file}: unused step definition(s) registered by the "${base}" definer: ${list} — `
+        + 'matched by no scenario step; delete the definition, or restore the scenario meant to '
+        + 'consume it (a spec-first consumer can be held in the wip register while the code catches up)');
     });
   }
   for (const sc of parsed.scenarios) {
@@ -1240,8 +1732,9 @@ function runFeature(parsed, registry, register = registerTest, recorder = null) 
 }
 
 /**
+ * @template [W=Record<string, any>]
  * @param {string} file
- * @param {StepRegistry} registry
+ * @param {StepRegistry<W>} registry
  * @param {typeof registerTest} [register] test-registration hook; supplied by
  *   bindRunner, defaults to the runtime's native runner
  */
@@ -1507,7 +2000,10 @@ const manifestClaims = new Map();
  * Under Deno the write needs `--allow-write=<its directory>`.
  *
  * @param {string} dir directory containing .feature files
- * @param {Record<string, (reg: StepRegistry) => any>} definers feature basename → step definer
+ * @param {Record<string, Definer<any>>} definers feature basename → step definer;
+ *   annotate an entry `Definer<MyWorld>` to type its steps' world — the record
+ *   stays `any` deliberately: each feature has its OWN world, and one type
+ *   parameter here would collapse them all into one
  * @param {{ wip?: Iterable<WipEntry>, manifest?: string }} [opts] features (or
  *   scenarios) still bootstrapping (TODO allowed); run-manifest output path
  * @param {typeof registerTest} [register] test-registration hook; supplied by
@@ -1731,6 +2227,7 @@ function runFeatures(dir, definers, opts = {}, register = registerTest) {
 }
 
 module.exports = {
-  parseFeature, lintFeature, StepRegistry, executeSteps, runFeature, runFeatureFile, runFeatures,
+  parseFeature, lintFeature, lintStepDefinitionSource, StepRegistry, executeSteps,
+  runFeature, runFeatureFile, runFeatures,
   bindRunner, DataTable, buildSnippet, GherkinSyntaxError,
 };

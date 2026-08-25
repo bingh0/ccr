@@ -27,8 +27,8 @@ module.exports = function defineWindowsLauncherSteps(reg) {
   reg.define(/^the environment sets CCR_SIDEBAR_PCT to "(\d+)"$/, (w, pct) => { (w.env ||= {}).CCR_SIDEBAR_PCT = pct; });
   reg.define(/^`ccs` is resolvable on PATH$/, (w) => { (w.present ||= {}).ccs = true; });
   reg.define(/^`ccs` is not resolvable on PATH$/, (w) => { (w.present ||= {}).ccs = false; });
-  reg.define(/^the CCS profile directory "([^"]+)" exists$/, (w) => { w.existsProfile = true; });
-  reg.define(/^the CCS profile directory "([^"]+)" does not exist$/, (w) => { w.existsProfile = false; });
+  reg.define(/^the CCS profile directory "(?:[^"]+)" exists$/, (w) => { w.existsProfile = true; });
+  reg.define(/^the CCS profile directory "(?:[^"]+)" does not exist$/, (w) => { w.existsProfile = false; });
   reg.define(/^a stale file "exited" exists in the resolved state dir$/, (w) => { w.staleExited = true; });
   reg.define(/^ccr is run from the directory "([^"]+)"$/, (w, dir) => { w.cwd = dir; });
 
