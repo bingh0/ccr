@@ -5,6 +5,7 @@
 // waiting → live → ended states and the incremental tool/skills feed.
 
 const assert = require('node:assert');
+const { refuteWithControl } = require('./_absence');
 const fs = require('node:fs');
 const path = require('node:path');
 const { freshDir, SAMPLE, tmpFile, toolLine, append } = require('./_win-helpers');
@@ -35,6 +36,7 @@ module.exports = function defineSidecarHostingSteps(reg) {
   });
   reg.define(/^the sidecar redraws$/, (w) => { w.frame = composeFrame(w.dir, { now: 1_000_000 }); });
   reg.define(/^it renders the economy panel with correct block glyphs \(▓ ░ ●\) and colors$/, (w) => {
+    // step-lint: allow unearned-absence -- the waiting-state step above asserts /waiting for the first status tick/ positively on a frame from this same composer
     assert.ok(!/waiting/.test(w.frame), 'no longer waiting');
     assert.ok(/[▓░]/.test(w.frame), 'block glyphs present');
     assert.ok(/\x1b\[/.test(w.frame), 'ANSI color present');
@@ -110,7 +112,12 @@ module.exports = function defineSidecarHostingSteps(reg) {
     // tmux performs no escape processing. Embedding the paths in the binding
     // itself put them through tmux's parser AND the shell's, and escaping for
     // both at once is how the original injection survived its first fix.
-    assert.ok(!/run-shell \\"/.test(w.cycleBinding[0]), 'the binding must not use a tmux double-quoted string');
+    // Witness: the double-quoted form itself — the shape that once let an
+    // apostrophe in $HOME run as a command. The control keeps this refusal
+    // pointed at that bug rather than at a spelling of it nobody writes.
+    refuteWithControl(/run-shell \\"/, w.cycleBinding[0],
+      String.raw`printf "bind-key -n F4 run-shell \"$CMD\""`,
+      'the binding must not use a tmux double-quoted string');
   });
   reg.define(/^the key runs ccr's own cycle-view command against this profile's state dir$/, (w) => {
     const helper = /\{\s*\n\s*printf '#!\/bin\/sh[\s\S]*?\} > "\$CYCLE_SH"/.exec(w.launchSh);
@@ -128,7 +135,9 @@ module.exports = function defineSidecarHostingSteps(reg) {
     // The structural invariant the whole design exists to preserve; enforced
     // across the module graph by test/sidecar-capabilities.test.js.
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'sidecar.js'), 'utf8');
-    assert.ok(!/process\.stdin|readline/.test(src), 'the sidecar must have no input channel');
+    refuteWithControl(/process\.stdin|readline/, src,
+      fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'sidecar-keys.js'), 'utf8'),
+      'the sidecar must have no input channel');
     assert.match(src, /onSignal\('SIGUSR1'/, 'cycling arrives as a signal');
   });
 
@@ -166,7 +175,9 @@ module.exports = function defineSidecarHostingSteps(reg) {
   reg.define(/^it sends no signal to any process$/, () => {
     // Structural and absolute: there is no signalling code left to guard.
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'cycle-view.js'), 'utf8');
-    assert.ok(!/process\.kill|\bkill\(/.test(src), 'cycle-view must hold no signalling capability at all');
+    refuteWithControl(/process\.kill|\bkill\(/, src,
+      fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'instance-slot.js'), 'utf8'),
+      'cycle-view must hold no signalling capability at all');
   });
   reg.define(/^the only thing it can change is which pane is displayed$/, (w) => {
     // Its entire effect is one counter in one file; nothing else is touched.
@@ -265,7 +276,10 @@ module.exports = function defineSidecarHostingSteps(reg) {
     // The regression: `set -e` killed the script at the nvm glob, so it exited 2
     // with EMPTY stderr — no diagnosis, nothing to act on.
     assert.strictEqual(w.launch.status, 1, "the launcher's own guard exits 1, not the shell's 2");
-    assert.notStrictEqual(String(w.launch.stderr || '').trim(), '', 'never a silent abort');
+    // Positive direction: stderr must CARRY something, which is the fact the
+  // regression destroyed. Asserting "not empty string" says the same thing in
+    // the shape that goes green when the needle is wrong.
+    assert.ok(String(w.launch.stderr || '').trim().length > 0, 'never a silent abort');
   });
 
   // Heartbeat write safety

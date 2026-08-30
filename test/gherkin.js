@@ -12,8 +12,11 @@
 //
 // ccr uses the runner half of this file: parseFeature, StepRegistry,
 // executeSteps, runFeature, runFeatures, DataTable, buildSnippet, and
-// GherkinSyntaxError. The linter half (lintFeature) and the run manifest ship
-// with the copy but are not wired up here — see docs/GHERKIN.md.
+// GherkinSyntaxError — and, since 0.11.0, both linters: lintFeature gates the
+// reviewed corpus in strict mode (test/feature-lint.test.js) and
+// lintStepDefinitionSource gates the step layer (test/step-lint.test.js). The
+// run manifest ships with the copy and is still not wired up — see
+// docs/GHERKIN.md.
 // gherkin-node-test
 // A tiny, zero-dependency Gherkin runner on top of the runtime's built-in test
 // runner: node:test under Node, bun:test natively under Bun, and node:test

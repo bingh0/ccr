@@ -263,6 +263,7 @@ module.exports = function defineInstanceLifecycleSteps(reg) {
   reg.define(/^a's sidebar shows context at 40% and cost \$1\.00$/, (w) => {
     assert.match(w.frame, /40%/, 'a\'s own context, not b\'s');
     assert.match(w.frame, /\$1\.00/, 'a\'s own cost, not b\'s');
+    // step-lint: allow unearned-absence -- the line above asserts /\$1\.00/ POSITIVELY on this same frame, proving a dollar figure in exactly this format renders here; only the digits differ
     assert.doesNotMatch(w.frame, /\$9\.00/, 'b\'s cost must not leak into a\'s panel');
   });
 

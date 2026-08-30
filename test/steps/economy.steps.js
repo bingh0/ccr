@@ -3,6 +3,9 @@
 // Step definitions for features/economy.feature — drives src/render/economy.js.
 
 const assert = require('node:assert');
+const path = require('node:path');
+const fs = require('node:fs');
+const { refuteWithControl } = require('./_absence');
 const { renderEconomy } = require('../../src/render/economy');
 
 const strip = (/** @type {string} */ s) => s.replace(/\x1b\[[0-9;]*m/g, '');
@@ -46,6 +49,13 @@ function meterRow(/** @type {Record<string, any>} */ w, /** @type {string} */ la
   return w.lines.find((/** @type {string} */ l) => /[▓░]/.test(l) && new RegExp('\\b' + label + '\\b').test(l)) || '';
 }
 
+// Several refusals below are of one shape: a word that lives in ccr's MODEL
+// must never reach the SCREEN. Each is controlled against the module that
+// legitimately uses it, so renaming the concept upstream fails the control
+// instead of quietly retiring the refusal.
+const srcOf = (/** @type {string} */ name) =>
+  fs.readFileSync(path.join(__dirname, '..', '..', 'src', name), 'utf8');
+
 /** @param {import('../gherkin').StepRegistry} reg */
 module.exports = function defineEconomySteps(reg) {
   // --- Background / given ---
@@ -84,10 +94,11 @@ module.exports = function defineEconomySteps(reg) {
     assert.match(w.hero, /~\d+[mhd]/, 'hero shows a time figure');
   });
   reg.define(/^the screen does not headline a percentage-per-minute burn rate$/, (w) => {
-    assert.ok(!w.out.includes('%/min'), 'no %/min anywhere');
+    refuteWithControl('%/min', w.out, srcOf('burn.js'), 'no %/min anywhere');
   });
   reg.define(/^the time figure reads as remaining budget, not as percentage used$/, (w) => {
     assert.match(w.hero, /~\d/, 'hero is a time, not a %');
+    // step-lint: allow unearned-absence -- the used-vs-left step below asserts /\d+% used/ positively on a meter row from this same render
     assert.ok(!/% used/.test(w.hero), 'hero is not "% used"');
   });
 
@@ -99,7 +110,8 @@ module.exports = function defineEconomySteps(reg) {
     assert.ok(w.out.includes(drop), `expected "${drop}"`);
   });
   reg.define(/^the screen does not require the reader to know what "ROI" means$/, (w) => {
-    assert.ok(!w.out.includes('ROI'));
+    refuteWithControl('ROI', w.out, srcOf('economy-model.js'),
+      'the screen must not make the reader know the jargon its model uses');
   });
   reg.define(/^the clear line says there is little to gain from clearing$/, (w) => {
     assert.match(w.out, /little to gain/);
@@ -128,18 +140,22 @@ module.exports = function defineEconomySteps(reg) {
   reg.define(/^the "([^"]+)" line is labelled as used, not left$/, (w, meter) => {
     const row = meterRow(w, String(meter));
     assert.match(row, /\d+% used/, `${meter} shows "% used"`);
+    // step-lint: allow unearned-absence -- the line above asserts /\d+% used/ positively on this same row: same shape, one word apart
     assert.ok(!/\d+% left/.test(row), `${meter} must not show "% left"`);
   });
   reg.define(/^any time figure labelled "left" or "until" refers to remaining budget$/, (w) => {
+    // step-lint: allow unearned-absence -- the used-vs-left step above asserts /\d+% used/ positively on a row of this same output
     assert.ok(!/% left/.test(w.out), 'no percentage is labelled "left"');
   });
 
   // --- Plain labels ---
   reg.define(/^the screen does not contain the label "re-read"$/, (w) => {
-    assert.ok(!w.out.includes('re-read'));
+    refuteWithControl('re-read', w.out, srcOf('sidecar.js'),
+      'the screen names things plainly; "re-read" is the codebase\'s word');
   });
   reg.define(/^cache efficiency, if shown, uses a self-evident word like "cached"$/, (w) => {
-    assert.ok(!/cache[ -]read/i.test(w.out));
+    refuteWithControl(/cache[ -]read/i, w.out, 'cache read / cache-read',
+      'cache efficiency is said in a self-evident word, never as "cache read"');
     if (/cache/i.test(w.out)) assert.ok(w.out.includes('cached'));
   });
 
@@ -159,6 +175,7 @@ module.exports = function defineEconomySteps(reg) {
 
   // --- Theme ---
   reg.define(/^the screen does not use the phrase "bad moon rising"$/, (w) => {
+    // step-lint: allow unearned-absence -- the sibling step immediately below asserts this exact phrase positively on the same output
     assert.ok(!w.out.includes('bad moon rising'));
   });
   reg.define(/^the screen uses the phrase "bad moon rising"$/, (w) => {
@@ -176,7 +193,9 @@ module.exports = function defineEconomySteps(reg) {
     assert.ok(w.out.includes(cost), `expected ${cost}`);
   });
   reg.define(/^it shows no fabricated burn rate or time-to-limit$/, (w) => {
-    assert.ok(!/next limit/.test(w.out) && !/~\d+[mhd]/.test(w.out), 'no invented time-to-limit');
+    refuteWithControl(/next limit/, w.out, srcOf('theme.js'), 'no invented next-limit label');
+    // step-lint: allow unearned-absence -- the hero step above asserts /~\d+[mhd]/ positively on a real render, proving this needle finds a time figure when one exists
+    assert.ok(!/~\d+[mhd]/.test(w.out), 'no invented time-to-limit');
   });
 
   // --- Critical-zone precision + snapshot freshness ---

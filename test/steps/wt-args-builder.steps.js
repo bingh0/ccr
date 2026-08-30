@@ -6,6 +6,7 @@
 // exit sentinel is wired); the exact-token pinning lives in launch-win.test.js.
 
 const assert = require('node:assert');
+const { refuteWithControl } = require('./_absence');
 const { launchWin, panes } = require('./_win-helpers');
 
 const DEFAULTS = {
@@ -88,7 +89,10 @@ module.exports = function defineWtArgsBuilderSteps(reg) {
     assert.ok(panes(w.args).pane0.includes(`"${w.settingsFile}"`));
   });
   reg.define(/^no raw JSON object appears on the command line$/, (w) => {
-    assert.ok(!w.args.join(' ').includes('{'));
+    // Witness: a real settings object, which is exactly what must not appear
+    // inline on the command line instead of being referenced by path.
+    refuteWithControl('{', w.args.join(' '), JSON.stringify({ statusLine: { type: 'command' } }),
+      'the settings object is passed by path, never inline');
   });
 
   // findWindowsTerminal

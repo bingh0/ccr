@@ -4,9 +4,11 @@
 // run() on a simulated win32 box and asserts the rendered report.
 
 const assert = require('node:assert');
+const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { run } = require('../../src/doctor');
+const { refuteWithControl } = require('./_absence');
 
 const hasStub = (/** @type {Record<string, string>} */ present) =>
   (/** @type {string} */ cmd) => (present[cmd] ? present[cmd] : null);
@@ -37,7 +39,12 @@ module.exports = function defineDoctorWindowsSteps(reg) {
   reg.define(/^it reports node OK$/, (w) => assert.match(w.text, /node v/));
   reg.define(/^it reports ccr-on-PATH OK$/, (w) => assert.match(w.text, /ccr on PATH/));
   reg.define(/^it reports "✓ Windows Terminal \(sidecar host\)"$/, (w) => assert.match(w.text, /Windows Terminal \(sidecar host\)/));
-  reg.define(/^the output contains no "use WSL" \/ "WSL-only" language$/, (w) => assert.ok(!/WSL/i.test(w.text)));
+  // The witness is the sentence being refused: doctor once could have sent
+  // Windows users to WSL, and this pins that it does not. A needle that stops
+  // matching that sentence is a needle that would no longer notice.
+  reg.define(/^the output contains no "use WSL" \/ "WSL-only" language$/, (w) =>
+    refuteWithControl(/WSL/i, w.text, 'the sidecar is WSL-only — use WSL',
+      'doctor must not send Windows users to WSL'));
 
   reg.define(/^it warns that Windows Terminal was not found$/, (w) => assert.match(w.text, /Windows Terminal not found/));
   reg.define(/^it suggests "winget install Microsoft\.WindowsTerminal"$/, (w) => assert.match(w.text, /winget install Microsoft\.WindowsTerminal/));
@@ -45,5 +52,11 @@ module.exports = function defineDoctorWindowsSteps(reg) {
 
   reg.define(/^ccs presence is reported as optional$/, (w) => assert.match(w.text, /ccs not installed \(optional/));
   reg.define(/^the capture-status check is reported$/, (w) => assert.match(w.text, /status captured|no status captured/));
-  reg.define(/^the executable-bit \(0o111\) check is skipped on Windows$/, (w) => assert.ok(!/is executable/.test(w.text)));
+  // Controlled against doctor's own source, which carries the POSIX phrase
+  // ('sidecar/ccr-statusline is executable'). Reword that check and this
+  // refusal goes red rather than silently passing on a phrase nobody emits.
+  reg.define(/^the executable-bit \(0o111\) check is skipped on Windows$/, (w) =>
+    refuteWithControl(/is executable/, w.text,
+      fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'doctor.js'), 'utf8'),
+      'the executable-bit check has no meaning on Windows and must not run'));
 };

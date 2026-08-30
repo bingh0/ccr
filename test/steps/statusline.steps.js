@@ -3,6 +3,7 @@
 // Step definitions for features/statusline.feature — drives src/render/statusline.js.
 
 const assert = require('node:assert');
+const { refuteWithControl } = require('./_absence');
 const { renderStatusline } = require('../../src/render/statusline');
 
 /** @param {string} s e.g. "4h00m", "5d00h" → minutes */
@@ -63,9 +64,14 @@ module.exports = function defineStatuslineSteps(reg) {
   });
   reg.define(/^the line shows the context percentage "([^"]+)"$/, (w, s) => assert.ok(w.line.includes(s), w.line));
   reg.define(/^the line shows the cost "([^"]+)"$/, (w, s) => assert.ok(w.line.includes(s), w.line));
-  reg.define(/^the line contains no ANSI colour codes$/, (w) => assert.ok(!/\x1b\[/.test(w.line), `ANSI found: ${JSON.stringify(w.line)}`));
+  // Witness: a real SGR run. Claude Code renders the status line itself, so
+  // the refusal is the whole contract here and nothing positive can stand in.
+  reg.define(/^the line contains no ANSI colour codes$/, (w) =>
+    refuteWithControl(/\x1b\[/, w.line, '\x1b[31mred\x1b[0m',
+      `ANSI found: ${JSON.stringify(w.line)}`));
   reg.define(/^the line contains the warning marker$/, (w) => assert.ok(w.line.includes('⚠'), `no marker in: ${w.line}`));
   reg.define(/^the line states there are no limits$/, (w) => assert.ok(/no limits/i.test(w.line), w.line));
+  // step-lint: allow unearned-absence -- the binding-window step below asserts /~\d/ POSITIVELY on this same w.line, so a needle that stopped matching a real time-to-limit would fail there first
   reg.define(/^the line shows no fabricated time-to-limit$/, (w) => assert.ok(!/~\d/.test(w.line), `unexpected time figure: ${w.line}`));
 
   // --- Critical-zone progressive disclosure ---
@@ -75,6 +81,7 @@ module.exports = function defineStatuslineSteps(reg) {
     assert.match(w.line, /~\d/, `expected a time-to-limit in: ${w.line}`);
     // A disclosed used% renders as "<n>% ~<time>". The context percentage
     // ("ctx 15%") is never followed by a time, so it cannot false-positive here.
-    assert.ok(!/%\s*~/.test(w.line), `unexpected used% before the time in: ${w.line}`);
+    refuteWithControl(/%\s*~/, w.line, '87% ~2h',
+      `unexpected used% before the time in: ${w.line}`);
   });
 };

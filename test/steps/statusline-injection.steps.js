@@ -6,6 +6,7 @@
 // guarantees no ~/.claude mutation.
 
 const assert = require('node:assert');
+const { refuteWithControl } = require('./_absence');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -49,7 +50,9 @@ module.exports = function defineStatuslineInjectionSteps(reg) {
   // No file under ~/.claude is modified
   reg.define(/^a snapshot of "~\/\.claude" before launch$/, () => {});
   reg.define(/^no file under "~\/\.claude" has changed$/, (w) => {
-    assert.ok(!String(w.settingsPath).includes('.claude'), w.settingsPath);
+    // Witness: the real ~/.claude path this scenario exists to keep clear of.
+    refuteWithControl('.claude', String(w.settingsPath), path.join(os.homedir(), '.claude'),
+      String(w.settingsPath));
   });
   reg.define(/^credentials and CCS symlinks are untouched$/, (w) => {
     // The only file the launcher writes is the temp settings file; nothing

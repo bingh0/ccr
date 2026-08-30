@@ -6,6 +6,7 @@
 
 const assert = require('node:assert');
 const { launchWin, launcherDeps } = require('./_win-helpers');
+const { refuteWithControl } = require('./_absence');
 
 function runLauncher(/** @type {Record<string, any>} */ w) {
   const deps = launcherDeps(w);
@@ -35,5 +36,10 @@ module.exports = function defineFallbackNoWtSteps(reg) {
   reg.define(/^the process exits non-zero$/, (w) => assert.notStrictEqual(w.code, 0));
 
   reg.define(/^no unhandled exception is raised$/, (w) => assert.strictEqual(w.threw, false));
-  reg.define(/^no stack trace is printed$/, (w) => assert.ok(!/\n\s+at .+:\d+:\d+/.test(w.err)));
+  // The witness is a real stack from this very process — if Node's frame
+  // format ever changes, the control says so instead of this refusal quietly
+  // becoming true for every output on earth.
+  reg.define(/^no stack trace is printed$/, (w) =>
+    refuteWithControl(/\n\s+at .+:\d+:\d+/, w.err, String(new Error('control').stack),
+      'a crash dump is not guidance'));
 };

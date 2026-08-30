@@ -10,6 +10,7 @@
 // the CLI surface carries no column count.
 
 const assert = require('node:assert');
+const { refuteWithControl } = require('./_absence');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -172,10 +173,14 @@ module.exports = function defineInstanceIdentitySteps(reg) {
     const settingIt = sh.split('\n').filter((l) => /^\s*tmux .*set-titles-string/.test(l));
     assert.strictEqual(settingIt.length, 1, 'one composition point, in the launcher');
     assert.match(settingIt[0], /"\$CCR_TITLE"/, 'a literal, never a tmux format that follows the session');
+    // Witness: the real OSC title sequences. ccr sets its title through tmux's
+    // set-titles-string alone, so nothing in src may emit one directly — and a
+    // needle that stopped naming those sequences would certify that silently.
+    const OSC_TITLE = '\x1b]0;a title\x07 and \x1b]2;another\x07';
     for (const f of fs.readdirSync(path.join(__dirname, '..', '..', 'src'))) {
       if (!f.endsWith('.js')) continue;
       const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', f), 'utf8');
-      assert.ok(!/\]0;|\]2;/.test(src), `${f} must not emit an OSC title`);
+      refuteWithControl(/\]0;|\]2;/, src, OSC_TITLE, `${f} must not emit an OSC title`);
     }
   });
 
@@ -190,11 +195,15 @@ module.exports = function defineInstanceIdentitySteps(reg) {
     const { renderStatusline } = require('../../src/render/statusline');
     const { normalizeStatus } = require('../../src/normalize');
     const state = JSON.parse(statusJson(w, { cwd: w.launchCwd }));
-    const render = () => renderStatusline(normalizeStatus(state), {
-      name: w.name, location: 'docs-mirror', cols: 34,
+    const render = (/** @type {number} */ cols) => renderStatusline(normalizeStatus(state), {
+      name: w.name, location: 'docs-mirror', cols,
     });
-    w.line = render();
-    w.lineAgain = render();
+    w.line = render(34);
+    w.lineAgain = render(34);
+    // The control arm for the ellipsis Then: the same render given room shows
+    // the name whole. Without it, "the full name is absent" is equally true of
+    // a name this step has misspelt.
+    w.lineRoomy = render(200);
   });
 
   reg.define(/^its sidebar draws$/, (w) => {
@@ -236,7 +245,8 @@ module.exports = function defineInstanceIdentitySteps(reg) {
 
   reg.define(/^the instance name is shortened with an ellipsis$/, (w) => {
     assert.ok(w.line.includes('…'), w.line);
-    assert.ok(!w.line.includes('a-very-long-instance-name-indeed'), 'the full name cannot fit');
+    refuteWithControl(w.name, w.line, w.lineRoomy,
+      `the full name cannot fit at 34 columns: ${w.line}`);
   });
 
   reg.define(/^a second render of the same state is identical to the first$/, (w) => {

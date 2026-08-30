@@ -11,6 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { loadPaneConfig, configPath } = require('../../src/pane-config');
+const { refuteWithControl } = require('./_absence');
 
 /** @param {import('../gherkin').StepRegistry} reg */
 module.exports = function definePaneConfigSteps(reg) {
@@ -77,9 +78,18 @@ module.exports = function definePaneConfigSteps(reg) {
   reg.define(/^ccr never searches upward from the working directory for configuration$/, () => {
     // Structural: the resolver is a pure function of env + homedir. If it ever
     // grew an upward walk it would have to consult process.cwd().
-    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'pane-config.js'), 'utf8');
-    assert.ok(!/process\.cwd\(\)/.test(src), 'pane-config must never consult the working directory');
-    assert.ok(!/readdirSync|existsSync/.test(src), 'no directory probing — the path is computed, not discovered');
+    //
+    // Both refusals are controlled against a sibling module that really does
+    // the thing being denied — state-dir consults the cwd, session-log probes
+    // with existsSync — so a needle that stops matching ccr's own source is
+    // caught here rather than turning these two lines quietly green.
+    const read = (/** @type {string} */ name) =>
+      fs.readFileSync(path.join(__dirname, '..', '..', 'src', name), 'utf8');
+    const src = read('pane-config.js');
+    refuteWithControl(/process\.cwd\(\)/, src, read('state-dir.js'),
+      'pane-config must never consult the working directory');
+    refuteWithControl(/readdirSync|existsSync/, src, read('session-log.js'),
+      'no directory probing — the path is computed, not discovered');
   });
 
   // --- Reading the pane list ---

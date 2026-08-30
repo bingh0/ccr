@@ -4,6 +4,8 @@
 // src/launch-vscode.js run()/hint() with fully-injected, recorded side effects.
 
 const assert = require('node:assert');
+const fs = require('node:fs');
+const { refuteWithControl } = require('./_absence');
 const path = require('node:path');
 const vscode = require('../../src/launch-vscode');
 const sidecar = require('../../src/sidecar');
@@ -140,7 +142,11 @@ module.exports = function defineVscodeSidecarSteps(reg) {
     assert.match(w.out, /picks this session up/);
   });
   reg.define(/^no split banner is printed$/, (w) => {
-    assert.ok(!w.out.includes('split your VS Code terminal'), `banner leaked into: ${w.out}`);
+    // Controlled against the launcher source that owns the banner text, so a
+    // reworded banner fails here instead of making this refusal vacuous.
+    refuteWithControl('split your VS Code terminal', w.out,
+      fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'launch-vscode.js'), 'utf8'),
+      `banner leaked into: ${w.out}`);
   });
   reg.define(/^nothing is copied to the clipboard$/, (w) => {
     assert.strictEqual(w.osc52, false, 'no OSC 52 escape');

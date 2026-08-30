@@ -20,11 +20,16 @@ see [BDD.md](BDD.md). The split is deliberate: this file mirrors an upstream
 package, and ccr's policy is not the runner's semantics.
 
 Of the runner itself, this page covers only what ccr wires up and relies
-on. The vendored copy also carries a feature-file **linter**
-(`lintFeature`), a **run manifest**, and `bindRunner` — shipped with the file,
-not wired up here. For those, and for the authoritative account of everything
-below, read the upstream README; this page is kept to what ccr relies on so it
-stays true without tracking every upstream release.
+on. The vendored copy also carries two **linters** and a **run manifest**.
+Both linters are wired: `lintFeature` gates the reviewed corpus in strict mode
+(`test/feature-lint.test.js`, with a reasoned register for the heuristic
+`vague-then` class), and `lintStepDefinitionSource` gates the step layer
+(`test/step-lint.test.js`), where every absence assertion must be earned by a
+control or sanctioned by a marker naming its prover. The run manifest and
+`bindRunner` ship with the file and are not wired up here. For those, and for
+the authoritative account of everything below, read the upstream README; this
+page is kept to what ccr relies on so it stays true without tracking every
+upstream release.
 
 It exists because the alternative — pulling in `@cucumber/gherkin` + a Vitest/Jest
 binding — would add a dependency tree and a build step to a tool whose whole

@@ -4,6 +4,7 @@
 // and src/render/resume.js (renderResume). Pure: no filesystem.
 
 const assert = require('node:assert');
+const { refuteWithControl } = require('./_absence');
 const { buildRow } = require('../../src/resume');
 const { renderResume } = require('../../src/render/resume');
 
@@ -38,7 +39,10 @@ module.exports = function defineResumeSteps(reg) {
   reg.define(/^the output shows "([^"]+)"$/, (w, s) => assert.ok(w.out.includes(s), w.out));
   reg.define(/^the output points to "([^"]+)"$/, (w, s) => assert.ok(w.out.includes(s), w.out));
   reg.define(/^the output does not claim a percentage of the rate-limit window$/, (w) => {
-    assert.ok(!/(5h|weekly|rate.?limit)/i.test(w.out), `must not reference rate-limit windows:\n${w.out}`);
+    // The witness spells every alternative, so dropping or misspelling one is
+    // red here rather than silently narrowing what this refusal covers.
+    refuteWithControl(/(5h|weekly|rate.?limit)/i, w.out, '5h window, weekly window, rate limit',
+      `must not reference rate-limit windows:\n${w.out}`);
   });
   reg.define(/^the output flags it as near \/clear$/, (w) => assert.match(w.out, /near \/clear/));
   reg.define(/^the output suggests "([^"]+)"$/, (w, s) => assert.ok(w.out.includes(s), w.out));

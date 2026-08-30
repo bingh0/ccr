@@ -13,6 +13,7 @@
 // are pinned structurally against the launcher rather than by spawning tmux.
 
 const assert = require('node:assert');
+const { refuteWithControl } = require('./_absence');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -32,6 +33,12 @@ const {
 
 const ROOT = path.join(__dirname, '..', '..');
 const GOLDEN = JSON.parse(fs.readFileSync(path.join(ROOT, 'docs', 'pane-blob.golden.json'), 'utf8'));
+
+// Witness modules for the structural refusals below: each names a place in
+// ccr that legitimately does the thing the pane path must not, so a needle
+// that stops matching real code fails its control instead of certifying the
+// pane clean of something nobody looks for any more.
+const srcOf = (/** @type {string} */ rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 
 /** Visible text: SGR colour runs are ccr's own and never the subject of a claim. */
 const plain = (/** @type {string} */ s) => s.replace(/\x1b\[[0-9;]*m/g, '');
@@ -162,7 +169,8 @@ module.exports = function definePaneBlobsSteps(reg) {
     // these files' comments legitimately discuss what they refuse to do.
     for (const f of ['src/pane-config.js', 'src/pane-blob.js']) {
       const src = code(fs.readFileSync(path.join(ROOT, f), 'utf8'), 'js');
-      assert.ok(!/readdirSync|globSync|\bglob\(/.test(src), `${f} must not enumerate paths`);
+      refuteWithControl(/readdirSync|globSync|\bglob\(/, src, srcOf('src/transcripts.js'),
+        `${f} must not enumerate paths`);
     }
   });
 
@@ -182,8 +190,8 @@ module.exports = function definePaneBlobsSteps(reg) {
     // globally against the whole module graph by sidecar-capabilities.test.js.
     for (const f of ['src/pane-blob.js', 'src/pane-config.js', 'src/render/pane.js']) {
       const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
-      assert.ok(!/child_process|sqlite|require\('node:(net|http|https|dgram|tls)'\)/.test(src),
-        `${f} must hold no process, network, or database capability`);
+      refuteWithControl(/child_process|sqlite|require\('node:(net|http|https|dgram|tls)'\)/, src,
+        srcOf('src/doctor.js'), `${f} must hold no process, network, or database capability`);
     }
   });
 
@@ -305,6 +313,7 @@ module.exports = function definePaneBlobsSteps(reg) {
 
   reg.define(/^a v1 blob whose title, labels, values, details, and message embed escape and control bytes$/, (w) => {
     const evil = '\x1b]0;PWNED\x07\x1b]52;c;cHduZWQ=\x07\x1b[31mX\x1b[6n';
+    w.evil = evil;   // the control arm for the Thens: what went IN must not come out
     writeBlob(w, {
       v: 1, tool: 'gt' + evil, title: 'trace' + evil, status: 'ok',
       basis: { label: 'refresh' + evil, at: '2026-08-01' + evil }, message: null,
@@ -317,11 +326,12 @@ module.exports = function definePaneBlobsSteps(reg) {
   });
   reg.define(/^the terminal receives no escape sequence originating from blob content$/, (w) => {
     // ccr's OWN colour runs are legitimate; nothing else may introduce an escape.
-    assert.ok(!plain(w.frame).includes('\x1b'), 'a blob-sourced escape reached the frame');
+    refuteWithControl('\x1b', plain(w.frame), w.evil,
+      'a blob-sourced escape reached the frame');
   });
   reg.define(/^the clipboard, window title, and pane chrome are untouched by the blob$/, (w) => {
     for (const seq of [']52;c;', ']0;']) {
-      assert.ok(!w.frame.includes('\x1b' + seq), `blob introduced ${seq}`);
+      refuteWithControl('\x1b' + seq, w.frame, w.evil, `blob introduced ${seq}`);
     }
   });
 
@@ -339,6 +349,7 @@ module.exports = function definePaneBlobsSteps(reg) {
     assert.match(w.plain, /blob written .+ ago/);
   });
   reg.define(/^the pane does not fall back to an error state$/, (w) => {
+    // step-lint: allow unearned-absence -- every alternative is asserted POSITIVELY elsewhere in this file: invalid (the invalid-state step), unreadable, cannot read, and oversized each have their own matching Then
     assert.ok(!/invalid|unreadable|oversized|cannot read/.test(w.plain), `fell back: ${w.plain}`);
   });
 
@@ -576,7 +587,7 @@ module.exports = function definePaneBlobsSteps(reg) {
     if (w.skipSymlink) return;
     // The target is a perfectly valid blob; if it were followed, its content
     // would render. Nothing from it may appear.
-    assert.ok(!w.plain.includes('gherkin-trace'), 'the symlink was followed');
+    refuteWithControl('gherkin-trace', w.plain, JSON.stringify(GOLDEN), 'the symlink was followed');
   });
 
   reg.define(/^a blob file larger than the size cap$/, (w) => {
@@ -587,7 +598,7 @@ module.exports = function definePaneBlobsSteps(reg) {
     assert.ok(namesSource(w.plain, w.source), 'the configured path is named');
   });
   reg.define(/^the file's content is not rendered$/, (w) => {
-    assert.ok(!w.plain.includes('gherkin-trace'), 'oversized content leaked');
+    refuteWithControl('gherkin-trace', w.plain, JSON.stringify(GOLDEN), 'oversized content leaked');
   });
 
   reg.define(/^a blob whose version field reads (\d+)$/, (w, v) => {
@@ -610,6 +621,7 @@ module.exports = function definePaneBlobsSteps(reg) {
     assert.match(w.plain, /attention/);
   });
   reg.define(/^no trace of the error state remains$/, (w) => {
+    // step-lint: allow unearned-absence -- same four-word vocabulary, each asserted positively by its own state step in this file
     assert.ok(!/unreadable|invalid|cannot read|oversized/.test(w.plain), 'error states are never sticky');
   });
 
@@ -629,8 +641,10 @@ module.exports = function definePaneBlobsSteps(reg) {
     // read a prompt file, a config string, or any other external text into the
     // keystroke — so assert against the code, not the comments explaining it.
     const sh = code(w.launchSh, 'sh');
-    assert.ok(!/prompt[-_]?file|PROMPT_FILE/i.test(sh), 'no prompt-file path may be read');
-    assert.ok(!/send-keys[^\n]*\$\((?!\s*tmux)/.test(sh), 'no command substitution supplies the typed text');
+    refuteWithControl(/prompt[-_]?file|PROMPT_FILE/i, sh, 'PROMPT_FILE=$HOME/.ccr/prompt-file',
+      'no prompt-file path may be read');
+    refuteWithControl(/send-keys[^\n]*\$\((?!\s*tmux)/, sh, 'tmux send-keys -t %s "$(cat "$F")" Enter',
+      'no command substitution supplies the typed text');
   });
   reg.define(/^the key is pressed and confirmed$/, (w) => {
     // The binding is emitted by printf, so the inner quotes are backslash-escaped
@@ -671,7 +685,9 @@ module.exports = function definePaneBlobsSteps(reg) {
     assert.ok(stmt, 'the F2 binding statement is emitted');
     assert.match(stmt[0], /send-keys -t %s '\/clear' Enter/, 'the target is a captured id, not a literal');
     assert.match(stmt[0], /"\$CLAUDE_PANE"/, 'the id filled in is the CLAUDE pane, not any other pane');
+    // step-lint: allow unearned-absence -- the line above asserts /"\$CLAUDE_PANE"/ positively on this same statement, proving a "$..._PANE" reference is found here when present
     assert.ok(!/"\$SIDEBAR_PANE"/.test(stmt[0]), 'never the sidecar\'s own pane');
+    // step-lint: allow unearned-absence -- the send-keys assertion two lines up matches /send-keys -t %s/ positively in this same launcher, so the prefix is proven; only the relative-index tail is denied
     assert.ok(!/send-keys -t \.\d/.test(w.launchSh), 'never a relative pane index, which retargets after a split');
   });
   reg.define(/^no other pane receives any keystroke$/, (w) => {
@@ -686,6 +702,7 @@ module.exports = function definePaneBlobsSteps(reg) {
   reg.define(/^nothing is typed anywhere$/, (w) => {
     // tmux's send-keys against a dead pane id is a no-op that fails the command;
     // what matters is that ccr never substitutes a fallback target.
+    // step-lint: allow unearned-absence -- the same launcher is asserted to carry /send-keys -t %s/ positively by the typed-into-Claude step, proving this needle's prefix finds real bindings
     assert.ok(!/send-keys -t \.\d|send-keys -t \{/.test(w.launchSh), 'no fallback target exists to retarget onto');
   });
 
@@ -707,14 +724,18 @@ module.exports = function definePaneBlobsSteps(reg) {
   });
   reg.define(/^no approximate target is substituted for the captured pane id$/, (w) => {
     const conf = fs.readFileSync(path.join(ROOT, 'sidecar', 'ccr.tmux.conf'), 'utf8');
+    // step-lint: allow unearned-absence -- the launcher's own F2 statement is matched positively by the typed-into-Claude step via /bind-key -n F2 confirm-before/, so this needle is proven to find a real binding when one exists
     assert.ok(!/bind-key -n F2/.test(conf), 'the shipped conf binds no approximate F2');
-    assert.ok(!/else/.test(/if \[ -n "\$CLAUDE_PANE" \][\s\S]*?fi/.exec(w.launchSh)?.[0] || ''),
-      'no fallback branch binds an approximate target');
+    // Witness: the whole launcher, whose one `else` lives in an unrelated
+    // branch — so /else/ is proven able to find a shell alternative here.
+    refuteWithControl(/else/, /if \[ -n "\$CLAUDE_PANE" \][\s\S]*?fi/.exec(w.launchSh)?.[0] || '',
+      w.launchSh, 'no fallback branch binds an approximate target');
   });
 
   reg.define(/^a valid v1 blob that also carries an action-like field naming a key and a command$/, (w) => {
     const b = validBlob();
     b.actions = [{ key: 'F5', command: 'rm -rf /', label: 'press F5 to refresh' }];
+    w.actionLabel = b.actions[0].label;   // the witness: this is what must not surface
     b.rows[0].action = { key: 'F6', command: 'curl evil.example' };
     writeBlob(w, b);
   });
@@ -725,15 +746,19 @@ module.exports = function definePaneBlobsSteps(reg) {
     }
   });
   reg.define(/^the pane shows no label claiming a key exists$/, (w) => {
-    assert.ok(!/press .* to/i.test(w.plain), 'a blob may not advertise a key');
+    refuteWithControl(/press .* to/i, w.plain, w.actionLabel, 'a blob may not advertise a key');
   });
   reg.define(/^nothing from the blob is ever typed into the Claude pane$/, () => {
     // Structural and absolute: there is no path from blob content to a binding.
     // The launcher's comments discuss blobs at length; its CODE never reads one.
     const sh = code(launchSh(), 'sh');
-    assert.ok(!/blob|sidecar\.json/i.test(sh), 'the launcher never reads blob content');
+    // Witness: the UNSTRIPPED launcher, whose comments discuss blobs at length.
+    // The code, with comments removed, may not — and if the word ever leaves
+    // those comments the control says so rather than this passing for free.
+    refuteWithControl(/blob|sidecar\.json/i, sh, launchSh(), 'the launcher never reads blob content');
     const paneSrc = code(fs.readFileSync(path.join(ROOT, 'src', 'render', 'pane.js'), 'utf8'), 'js');
-    assert.ok(!/send-keys|child_process/.test(paneSrc), 'the pane renderer holds no keystroke capability');
+    refuteWithControl(/send-keys|child_process/, paneSrc, launchSh(),
+      'the pane renderer holds no keystroke capability');
   });
 
   // ── The pane surface ──────────────────────────────────────────────────────
@@ -760,6 +785,7 @@ module.exports = function definePaneBlobsSteps(reg) {
     assert.match(w.views[0], /economy/, 'the first view is ccr\'s own');
     assert.match(w.views[1], /trace/, 'the first configured pane comes first');
     assert.match(w.views[2], /second/, 'the second configured pane comes second');
+    // step-lint: allow unearned-absence -- the line above asserts /second/ positively on views[2], proving the string reaches a rendered view
     assert.ok(!w.views[1].includes('second'), 'panes are whole views, never combined');
   });
   reg.define(/^the chrome shows the pane's position in the cycle$/, (w) => {
@@ -769,6 +795,7 @@ module.exports = function definePaneBlobsSteps(reg) {
     assert.match(w.views[2], atPos(panePos(w, 1)));
   });
   reg.define(/^no view is truncated to stack beside another$/, (w) => {
+    // step-lint: allow unearned-absence -- the whole-pane-view step asserts /economy/ positively on views[0], proving the string renders when the economy panel is the view
     assert.ok(!w.views[1].includes('economy'), 'a pane view never shares the pane with the economy panel');
   });
 
@@ -781,12 +808,13 @@ module.exports = function definePaneBlobsSteps(reg) {
       { label: 'r5', value: '5', status: 'off' },
     ];
     writeBlob(w, validBlob({ rows }));
+    w.rowsJson = JSON.stringify(rows);   // the witness for the hidden-row refusal
     w.maxRows = 3;          // the pane has room for three lines of body
   });
   reg.define(/^the visible rows are followed by a final line stating how many more rows exist$/, (w) => {
     assert.match(w.plain, /\+3 more/, `expected a collapsed count, got:\n${w.plain}`);
     assert.match(w.plain, /r1/);
-    assert.ok(!w.plain.includes('hidden-dark'), 'the hidden row is not shown in full');
+    refuteWithControl('hidden-dark', w.plain, w.rowsJson, 'the hidden row is not shown in full');
   });
   reg.define(/^that line carries the dark marker, the worst status among the hidden rows$/, (w) => {
     const line = w.frame.split('\n').find((/** @type {string} */ l) => plain(l).includes('more'));

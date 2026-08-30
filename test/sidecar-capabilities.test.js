@@ -135,6 +135,7 @@ const KEYS_ENTRY = path.join(ROOT, 'src', 'sidecar-keys.js');
 
 test('the renderer can never reach the hotkey host', () => {
   const names = [...GRAPH.keys()].map(rel);
+  // step-lint: allow unearned-absence -- "the graph walk actually found the sidecar and its renderers" below is this file's control arm: it proves GRAPH is populated and names three modules it must contain, so an empty walk cannot make this refusal vacuous
   assert.ok(!names.includes('src/sidecar-keys.js'),
     'src/sidecar.js now reaches the key reader — the renderer would gain an input '
     + 'channel, which is precisely the capability docs/PANE-CONTRACT.md says it lacks.');

@@ -14,6 +14,7 @@ const path = require('node:path');
 const { liveness } = require('../../src/liveness');
 const { composeFrame } = require('../../src/sidecar');
 const { freshDir, SAMPLE } = require('./_win-helpers');
+const { refuteWithControl } = require('./_absence');
 
 const LIVENESS_SRC = path.join(__dirname, '..', '..', 'src', 'liveness.js');
 
@@ -82,15 +83,18 @@ module.exports = function defineLivenessSteps(reg) {
     assert.ok(w.frame.includes(`updated ${n}m ago`), `no "updated ${n}m ago" in:\n${w.frame}`);
   });
   reg.define(/^no freshness marker is shown yet$/, (w) => {
+    // step-lint: allow unearned-absence -- "the dashboard remains visible with a freshness marker" below asserts this IDENTICAL regex positively on the same w.frame, so a rotted needle fails there
     assert.doesNotMatch(w.frame, /updated \d+m ago/);
   });
   reg.define(/^the screen shows "session ended"$/, (w) => {
     assert.match(w.frame, /session ended/);
   });
   reg.define(/^the live meters are no longer shown$/, (w) => {
+    // step-lint: allow unearned-absence -- dashboardVisible() above tests this same character class positively, and two steps in this file assert it holds on a live frame
     assert.ok(!/[▓░]/.test(w.frame), 'ended screen must not keep meter bars');
   });
   reg.define(/^the screen does not claim the session ended$/, (w) => {
+    // step-lint: allow unearned-absence -- "the screen shows \"session ended\"" above asserts this same string positively on the ended frame
     assert.ok(!w.frame.includes('session ended'));
   });
   reg.define(/^the dashboard remains visible with a freshness marker$/, (w) => {
@@ -115,6 +119,11 @@ module.exports = function defineLivenessSteps(reg) {
     const code = fs.readFileSync(LIVENESS_SRC, 'utf8')
       .replace(/\/\*[\s\S]*?\*\//g, '')   // block comments
       .replace(/\/\/.*$/gm, '');           // line comments
-    assert.doesNotMatch(code, /pstree|list-panes|child_process|execSync|spawnSync/);
+    // Controlled against doctor, which legitimately shells out — so the day a
+    // needle here stops naming a real probing API, this fails loudly instead of
+    // certifying liveness.js clean of something nobody is looking for any more.
+    refuteWithControl(/pstree|list-panes|child_process|execSync|spawnSync/, code,
+      fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'doctor.js'), 'utf8'),
+      'liveness must decide from the filesystem alone, never by probing processes');
   });
 };

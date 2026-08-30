@@ -15,6 +15,8 @@
 // the boundary, not our own opinion of it.
 
 const assert = require('node:assert');
+const fs = require('node:fs');
+const { refuteWithControl } = require('./_absence');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
@@ -55,6 +57,7 @@ module.exports = function defineSidecarHotkeysSteps(reg) {
       /** @type {string[]} */ killed: [],
       kill(/** @type {string} */ sig) { this.killed.push(sig); },
       on(/** @type {string} */ ev, /** @type {Function} */ fn) { handlers[ev] = fn; },
+      // step-lint: allow rest-signature -- not a step callback: this is a mock child process's event emitter, which must forward whatever tuple node's 'exit'/'error' events carry
       fire(/** @type {string} */ ev, /** @type {any[]} */ ...args) { if (handlers[ev]) handlers[ev](...args); },
     };
   };
@@ -215,6 +218,8 @@ module.exports = function defineSidecarHotkeysSteps(reg) {
   reg.define(/^no panel is started$/, (w) => {
     // The process returned instead of running the loop; a panel that started
     // would not have exited at all, and the run above would have timed out.
-    assert.doesNotMatch(w.cli.stderr, /waiting for the first status tick/);
+    refuteWithControl(/waiting for the first status tick/, w.cli.stderr,
+      fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'sidecar.js'), 'utf8'),
+      'a started panel would have printed its waiting state and never exited');
   });
 };
