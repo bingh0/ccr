@@ -255,7 +255,7 @@ New behavior:
 
 | tmux feature (`launch.sh` / `ccr.tmux.conf`) | Windows Terminal equivalent | Status |
 |---|---|---|
-| `new-session` + `split-window -h -p 34` | `wt -w 0 new-tab ... ; split-pane -V -s 0.34 ...` | ✅ MVP |
+| `new-session` + `split-window -h -l 34%` | `wt -w 0 new-tab ... ; split-pane -V -s 0.34 ...` | ✅ MVP |
 | `new-session` inherits `$PWD` — Claude opens where you ran `ccr` | `wt ... new-tab -d <cwd> ... ; split-pane -d <cwd> ...`. **wt does NOT inherit**: without `-d` a pane uses the WT *profile's* `startingDirectory` (default `%USERPROFILE%`). Free on tmux, which is why the first cut of this table omitted the row | ✅ §8.10 |
 | pane 0 runs `claude --settings` | `wt` pane 0 `cmd /c claude --settings <file>` | ✅ MVP |
 | pane 1 runs `ccr sidecar` | `wt` pane 1 `cmd /c node bin/ccr.js sidecar --exit-on-end` | ✅ MVP |

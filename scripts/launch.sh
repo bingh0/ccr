@@ -135,7 +135,14 @@ if [ -n "${CCR_TITLE:-}" ]; then
 fi
 
 # Pane 1: the live economy sidebar. Capture its pane id so we can scope a hook to it.
-SIDEBAR_PANE="$(tmux -L "$SOCKET" split-window -t "$SESSION:0" -h -p "${CCR_SIDEBAR_PCT:-34}" -P -F '#{pane_id}' \
+# The width is `-l <pct>%`, NOT `-p <pct>`. Both spell the same split, but `-p` is the
+# deprecated form and tmux 3.4 — what Ubuntu 24.04 LTS ships, i.e. every stock Ubuntu
+# Server — rejects it with `size missing`. That killed the launcher AFTER new-session
+# had already succeeded, so the failure mode was silent and confusing: a live Claude
+# pane, no sidebar, no error on screen (launch.sh's stderr goes to the terminal it was
+# spawned from, which is gone by then). `-l N%` is accepted by 3.1 through 3.6+ alike
+# and produces an identical split, so there is no version guard to maintain.
+SIDEBAR_PANE="$(tmux -L "$SOCKET" split-window -t "$SESSION:0" -h -l "${CCR_SIDEBAR_PCT:-34}%" -P -F '#{pane_id}' \
   "$ENV_PREAMBLE; \"$NODE\" \"$REPO/bin/ccr.js\" sidecar; read -r -p 'sidebar exited — Enter to close '")"
 
 # The sidebar is a live dashboard — there is nothing to scroll. A stray mouse-wheel
