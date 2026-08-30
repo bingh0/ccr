@@ -169,7 +169,11 @@ module.exports = function definePaneBlobsSteps(reg) {
     // these files' comments legitimately discuss what they refuse to do.
     for (const f of ['src/pane-config.js', 'src/pane-blob.js']) {
       const src = code(fs.readFileSync(path.join(ROOT, f), 'utf8'), 'js');
-      refuteWithControl(/readdirSync|globSync|\bglob\(/, src, srcOf('src/transcripts.js'),
+      // transcripts.js really enumerates; globSync and glob() exist nowhere in
+      // this repository, so they are spelled out beside it — every branch of an
+      // alternation has to be proved, or the unproved ones rot unnoticed.
+      refuteWithControl(/readdirSync|globSync|\bglob\(/, src,
+        srcOf('src/transcripts.js') + 'fs.globSync("*"); glob("*.json", cb)',
         `${f} must not enumerate paths`);
     }
   });
@@ -190,8 +194,12 @@ module.exports = function definePaneBlobsSteps(reg) {
     // globally against the whole module graph by sidecar-capabilities.test.js.
     for (const f of ['src/pane-blob.js', 'src/pane-config.js', 'src/render/pane.js']) {
       const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+      // doctor.js proves child_process; ccr opens no database and no socket
+      // anywhere, so those two branches are spelled out rather than left
+      // unproved — an unproved branch is a needle nobody is checking.
       refuteWithControl(/child_process|sqlite|require\('node:(net|http|https|dgram|tls)'\)/, src,
-        srcOf('src/doctor.js'), `${f} must hold no process, network, or database capability`);
+        srcOf('src/doctor.js') + "require('node:sqlite'); require('node:net')",
+        `${f} must hold no process, network, or database capability`);
     }
   });
 
@@ -752,12 +760,14 @@ module.exports = function definePaneBlobsSteps(reg) {
     // Structural and absolute: there is no path from blob content to a binding.
     // The launcher's comments discuss blobs at length; its CODE never reads one.
     const sh = code(launchSh(), 'sh');
-    // Witness: the UNSTRIPPED launcher, whose comments discuss blobs at length.
-    // The code, with comments removed, may not — and if the word ever leaves
-    // those comments the control says so rather than this passing for free.
-    refuteWithControl(/blob|sidecar\.json/i, sh, launchSh(), 'the launcher never reads blob content');
+    // Witness: the UNSTRIPPED launcher, whose comments discuss blobs at length,
+    // plus pane-config.js, which legitimately names sidecar.json. The code with
+    // comments removed may contain neither.
+    refuteWithControl(/blob|sidecar\.json/i, sh, launchSh() + srcOf('src/pane-config.js'),
+      'the launcher never reads blob content');
     const paneSrc = code(fs.readFileSync(path.join(ROOT, 'src', 'render', 'pane.js'), 'utf8'), 'js');
-    refuteWithControl(/send-keys|child_process/, paneSrc, launchSh(),
+    // Both branches witnessed for real: the launcher sends keys, doctor spawns.
+    refuteWithControl(/send-keys|child_process/, paneSrc, launchSh() + srcOf('src/doctor.js'),
       'the pane renderer holds no keystroke capability');
   });
 

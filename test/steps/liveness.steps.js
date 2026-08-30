@@ -119,11 +119,17 @@ module.exports = function defineLivenessSteps(reg) {
     const code = fs.readFileSync(LIVENESS_SRC, 'utf8')
       .replace(/\/\*[\s\S]*?\*\//g, '')   // block comments
       .replace(/\/\/.*$/gm, '');           // line comments
-    // Controlled against doctor, which legitimately shells out — so the day a
-    // needle here stops naming a real probing API, this fails loudly instead of
-    // certifying liveness.js clean of something nobody is looking for any more.
+    // The witness must prove EVERY branch, so it is composite: doctor.js
+    // really does spawn (child_process, spawnSync), and liveness.js's own
+    // comments name pstree — which is why the subject above is the stripped
+    // copy and the witness here is the raw one. `list-panes` and `execSync`
+    // have no instance anywhere in this repository, so they are spelled out:
+    // the weak form, which proves the branch is still spelt as intended but
+    // not that the concept survives upstream.
+    const NO_INSTANCE_HERE = 'tmux list-panes -F; execSync("...")';
     refuteWithControl(/pstree|list-panes|child_process|execSync|spawnSync/, code,
-      fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'doctor.js'), 'utf8'),
+      fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'doctor.js'), 'utf8')
+      + fs.readFileSync(LIVENESS_SRC, 'utf8') + NO_INSTANCE_HERE,
       'liveness must decide from the filesystem alone, never by probing processes');
   });
 };

@@ -22,12 +22,22 @@
 // When the needle rots, the control goes red and says so, instead of the
 // refusal quietly becoming true.
 //
-// The witness is the argument that does the work, so choose it as evidence, not
-// as decoration: the real string the forbidden code would contain, the real
-// fixture field whose value must not reach the frame. A witness written to
-// match the needle by construction (`'child_process'` for /child_process/)
-// proves only that the regex compiles. Prefer one taken from the world the
-// subject came from.
+// EVERY BRANCH, NOT JUST ONE. An alternation is where this discipline is
+// easiest to fake, and the first pass here did fake it: `/child_process|sqlite/`
+// witnessed by a file containing `child_process` satisfies a naive control
+// while `sqlite` stays completely unproven — free to be misspelt from the day
+// it was written. An audit of the first 36 controls found 6 in exactly that
+// state, with 10 unproven branches between them. So the check below splits the
+// needle on its top-level alternation and requires the witness to prove EACH
+// branch. A composite witness is the normal answer: concatenate the sources
+// that really contain each token.
+//
+// Choose witnesses as evidence, not decoration: the real module that does the
+// thing, the real fixture field whose value must not reach the frame. A witness
+// written to match by construction proves only that the regex compiles. Some
+// tokens have no instance anywhere in this repository (`readline`, `execSync`,
+// `globSync`, `sqlite`, `list-panes`) — for those a spelled-out literal is the
+// honest best available, and call sites say so where they use one.
 
 const assert = require('node:assert');
 
@@ -36,8 +46,31 @@ const stateless = (/** @type {RegExp} */ re) =>
   (re.global || re.sticky ? new RegExp(re.source, re.flags.replace(/[gy]/g, '')) : re);
 
 /**
+ * Split a regex source on its TOP-LEVEL `|`, leaving alternations nested inside
+ * groups and character classes alone.
+ * @param {string} src
+ * @returns {string[]}
+ */
+function topLevelBranches(src) {
+  /** @type {string[]} */ const out = [];
+  let depth = 0, inClass = false, cur = '';
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (c === '\\') { cur += c + (src[i + 1] || ''); i++; continue; }
+    if (inClass) { inClass = c !== ']'; cur += c; continue; }
+    if (c === '[') { inClass = true; cur += c; continue; }
+    if (c === '(') depth++;
+    else if (c === ')') depth--;
+    else if (c === '|' && depth === 0) { out.push(cur); cur = ''; continue; }
+    cur += c;
+  }
+  out.push(cur);
+  return out;
+}
+
+/**
  * Assert that `needle` is absent from `subject`, having first proved on
- * `witness` that it can still be found at all.
+ * `witness` that every branch of it can still be found at all.
  *
  * @param {RegExp | string} needle   what must be absent
  * @param {string} subject           the text it must be absent from
@@ -47,25 +80,19 @@ const stateless = (/** @type {RegExp} */ re) =>
 function refuteWithControl(needle, subject, witness, message) {
   const re = typeof needle === 'string' ? null : stateless(needle);
   const hits = (/** @type {string} */ s) => (re ? re.test(s) : s.includes(String(needle)));
-  assert.ok(
-    hits(witness),
-    `control arm: ${needle} no longer matches its witness, so the refusal below `
-    + 'proves nothing — fix the needle, not this line',
-  );
+
+  // The control arm, branch by branch.
+  const branches = re ? topLevelBranches(re.source) : [String(needle)];
+  const unproven = branches.filter((b) => {
+    if (!re) return !witness.includes(b);
+    try { return !new RegExp(b, re.flags).test(witness); } catch { return true; }
+  });
+  assert.deepStrictEqual(unproven, [],
+    `control arm: these branches of ${needle} no longer match their witness, so the `
+    + 'refusal below proves nothing about them — widen the witness to cover each '
+    + 'branch, or fix the needle. Never delete the branch to make this pass.');
+
   assert.ok(!hits(subject), message);
 }
 
-/**
- * The same discipline for a set of needles sharing one witness and one subject:
- * each is proved able to fire before it is refused.
- *
- * @param {Array<RegExp | string>} needles
- * @param {string} subject
- * @param {string} witness
- * @param {(needle: RegExp | string) => string} message
- */
-function refuteAllWithControl(needles, subject, witness, message) {
-  for (const n of needles) refuteWithControl(n, subject, witness, message(n));
-}
-
-module.exports = { refuteWithControl, refuteAllWithControl };
+module.exports = { refuteWithControl, topLevelBranches };

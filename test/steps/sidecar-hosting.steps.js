@@ -135,8 +135,12 @@ module.exports = function defineSidecarHostingSteps(reg) {
     // The structural invariant the whole design exists to preserve; enforced
     // across the module graph by test/sidecar-capabilities.test.js.
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'sidecar.js'), 'utf8');
+    // sidecar-keys.js really owns stdin; `readline` appears nowhere in this
+    // repository, so it is spelled out beside it rather than riding along
+    // unproved on its sibling branch.
     refuteWithControl(/process\.stdin|readline/, src,
-      fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'sidecar-keys.js'), 'utf8'),
+      fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'sidecar-keys.js'), 'utf8')
+      + "require('node:readline')",
       'the sidecar must have no input channel');
     assert.match(src, /onSignal\('SIGUSR1'/, 'cycling arrives as a signal');
   });
