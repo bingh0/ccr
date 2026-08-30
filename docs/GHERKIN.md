@@ -4,10 +4,10 @@ A **targeted** tool: it runs Gherkin (`.feature`) acceptance tests in plain
 JavaScript with **zero npm dependencies and no build step**, on top of the
 runtime's built-in test runner (`node:test` under Node; natively `bun:test`
 under Bun; Deno's `node:test` bridge under Deno — ccr itself runs it on Node).
-In ccr it executes the criteria in [`features/`](../features/). At ~1,700 lines
+In ccr it executes the criteria in [`features/`](../features/). At ~2,200 lines
 it is still small enough to read in one sitting and to vendor as a single file.
 
-`test/gherkin.js` is a vendored copy of **gherkin-node-test 0.9.0**
+`test/gherkin.js` is a vendored copy of **gherkin-node-test 0.11.0**
 ([source](https://github.com/bingh0/gherkin-node-test),
 [npm](https://www.npmjs.com/package/gherkin-node-test)) — that package is the
 canonical, standalone home; use it directly in other projects. The copy here

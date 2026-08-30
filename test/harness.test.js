@@ -79,9 +79,9 @@ test('executeSteps runs background + scenario against a shared world', async () 
 // These steps are built by hand rather than parsed, so `line` is positional and
 // not a claim about any file. The Step type requires it — the parser always
 // knows it, and the linter and run manifest both read it — but executeSteps
-// never does: verified against 0.9.0, the thrown message is byte-identical with
-// no line, with 1, and with 42. It is carried here to satisfy the type
-// honestly, not to change behaviour.
+// never does: verified against 0.9.0 and re-verified against 0.11.0, the thrown
+// message is byte-identical with no line, with 1, and with 42. It is carried
+// here to satisfy the type honestly, not to change behaviour.
 test('executeSteps throws on an undefined step', async () => {
   const reg = new StepRegistry();
   await assert.rejects(

@@ -164,7 +164,7 @@ essentially the strict grammar and a refusal to let the suite be quiet. It
 predates the scope interview, the out-of-scope fence, and the two-tier split.
 
 One asymmetry is worth naming, because the repository does not otherwise show
-it: the **runner** vendored here is current (gherkin-node-test 0.9.0), while the
+it: the **runner** vendored here is current (gherkin-node-test 0.11.0), while the
 **practice** documented above is 1.0-era. That is deliberate — ccr is maintained
 as a working tool, but its method is not retrofitted, because a specimen that
 gets upgraded stops being evidence of anything.
