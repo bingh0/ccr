@@ -35,8 +35,27 @@ function isExec(/** @type {string} */ f) {
   try { return (fs.statSync(f).mode & 0o111) !== 0; } catch { return false; }
 }
 
+// ccr's tmux dialect has a floor. 3.1 is HARD: percentage splits
+// (`split-window -l 34%`, since `-p` was deprecated there and 3.4+ rejects it)
+// and `terminal-features`, which sidecar/ccr.tmux.conf needs for true colour
+// over mosh. 3.2 adds pane-scoped hooks, which the launcher uses to keep the
+// sidebar out of copy-mode; below that it degrades quietly rather than
+// breaking, so 3.2 is what we ask for and 3.1 is what we tolerate.
+const TMUX_MIN = { major: 3, minor: 2 };
+/** @param {string} bin @returns {{major:number,minor:number}|null} */
+function tmuxVersion(bin) {
+  try {
+    const r = spawnSync(bin, ['-V'], { encoding: 'utf8' });
+    if (r.status !== 0) return null;
+    // "tmux 3.7c", "tmux 3.2a", "tmux next-3.6" — only the numbers matter.
+    const m = /(\d+)\.(\d+)/.exec(r.stdout || '');
+    return m ? { major: Number(m[1]), minor: Number(m[2]) } : null;
+  } catch { return null; }
+}
+
 /**
  * @param {{ platform?: string, has?: (cmd: string) => (string|null),
+ *   tmuxVersion?: (bin: string) => ({major:number,minor:number}|null),
  *   homedir?: string, repo?: string, write?: (s: string) => void,
  *   env?: Record<string, string|undefined> }} [opts]
  *   side effects are injectable for testing; defaults hit the real environment
@@ -45,6 +64,7 @@ function isExec(/** @type {string} */ f) {
 function run(opts = {}) {
   const platform = opts.platform || process.platform;
   const hasFn = opts.has || has;
+  const tmuxVerFn = opts.tmuxVersion || tmuxVersion;
   const homedir = opts.homedir || os.homedir();
   const REPO = opts.repo || path.join(__dirname, '..');
   const write = opts.write || ((s) => { process.stdout.write(s); });
@@ -74,8 +94,24 @@ function run(opts = {}) {
     // temp settings file, so there's no shipped shim asset to check on Windows.
   } else {
     const tmux = hasFn('tmux');
-    out.push(tmux ? ok(`tmux (${stripControl(tmux)})`) : warn('tmux missing — needed for the `ccr [profile]` sidebar'));
-    if (!tmux) problems++;
+    if (!tmux) {
+      out.push(warn('tmux missing — needed for the `ccr [profile]` sidebar'));
+      problems++;
+    } else {
+      const v = tmuxVerFn(tmux);
+      // An unreadable version is not evidence of a problem — say so and move on
+      // rather than manufacturing a failure out of a parse miss.
+      if (!v) {
+        out.push(ok(`tmux (${stripControl(tmux)})`) + dim(' — version unreadable'));
+      } else if (v.major < TMUX_MIN.major
+          || (v.major === TMUX_MIN.major && v.minor < TMUX_MIN.minor)) {
+        out.push(warn(`tmux ${v.major}.${v.minor} (${stripControl(tmux)}) — ccr wants `
+          + `${TMUX_MIN.major}.${TMUX_MIN.minor}+; below 3.1 the sidebar split fails outright`));
+        problems++;
+      } else {
+        out.push(ok(`tmux ${v.major}.${v.minor} (${stripControl(tmux)})`));
+      }
+    }
     out.push(hasFn('bash') ? ok('bash') : warn('bash missing — needed for the launcher'));
 
     const sl = path.join(REPO, 'sidecar', 'ccr-statusline');
