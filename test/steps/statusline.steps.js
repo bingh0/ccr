@@ -43,15 +43,15 @@ module.exports = function defineStatuslineSteps(reg) {
     view(w).model = model; view(w).windows = [];
   });
   reg.define(/^a 5h limit at (\d+)% used, resetting in (\S+), burning ([\d.]+)%\/min$/,
-    (w, u, dur, rate) => setWindow(w, 'five_hour', '5h', u, dur, Number(rate)));
+    (w, u, dur, rate) => setWindow(w, 'five_hour', '5h', String(u), String(dur), Number(rate)));
   reg.define(/^a weekly limit at (\d+)% used, resetting in (\S+), burning ([\d.]+)%\/min$/,
-    (w, u, dur, rate) => setWindow(w, 'seven_day', 'weekly', u, dur, Number(rate)));
+    (w, u, dur, rate) => setWindow(w, 'seven_day', 'weekly', String(u), String(dur), Number(rate)));
   // Fractional used% — the distinct "at a raw" phrasing keeps it clear of the
   // integer setters above (the harness rejects ambiguous step patterns).
   reg.define(/^a 5h limit at a raw ([\d.]+)% used, resetting in (\S+), burning ([\d.]+)%\/min$/,
-    (w, u, dur, rate) => setWindow(w, 'five_hour', '5h', u, dur, Number(rate)));
+    (w, u, dur, rate) => setWindow(w, 'five_hour', '5h', String(u), String(dur), Number(rate)));
   reg.define(/^status context of (\S+) tokens in a (\S+) window$/, (w, ctx, win) => {
-    view(w).contextTokens = parseTok(ctx); view(w).windowSize = parseTok(win);
+    view(w).contextTokens = parseTok(String(ctx)); view(w).windowSize = parseTok(String(win));
   });
   reg.define(/^a status session cost of ([\d.]+) USD$/, (w, usd) => { view(w).costUsd = Number(usd); });
 

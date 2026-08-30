@@ -41,7 +41,8 @@ module.exports = function defineLivenessSteps(reg) {
     fs.writeFileSync(path.join(w.dir, 'exited'), '');
     w.exited = true;
   });
-  const age = (/** @type {Record<string, any>} */ w, /** @type {string} */ n) => {
+  /** @type {import('../gherkin').StepFn} */
+  const age = (w, n) => {
     w.ageMs = Number(n) * 60000;
     const agoSec = (w.now - w.ageMs) / 1000;
     fs.utimesSync(path.join(w.dir, 'last-status.json'), agoSec, agoSec);

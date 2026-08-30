@@ -89,7 +89,7 @@ module.exports = function defineGitCommitGraphSteps(reg) {
       tip = commit(w, `commit ${i} of ${n}`, parents, T0 + i * 3600);
       parents = [tip];
     }
-    setRef(w, branch, tip);
+    setRef(w, String(branch), tip);
     w.newest = tip;
     w.commitCount = Number(n);
   });
@@ -100,7 +100,7 @@ module.exports = function defineGitCommitGraphSteps(reg) {
     const side = commit(w, 'side work', [base], T0 + 3600);
     const tip = commit(w, 'main work', [base], T0 + 7200);
     const merge = commit(w, 'merge side into main', [tip, side], T0 + 10800);
-    setRef(w, branch, merge);
+    setRef(w, String(branch), merge);
     w.newest = merge;
     w.merge = merge;
   });
@@ -125,7 +125,7 @@ module.exports = function defineGitCommitGraphSteps(reg) {
 
   reg.define(/^the newest commit's subject is "([^"]+)"$/, (w, subject) => {
     world(w);
-    const tip = commit(w, subject, [], T0 + 3600);
+    const tip = commit(w, String(subject), [], T0 + 3600);
     setRef(w, 'main', tip);
     w.newest = tip;
   });
@@ -220,7 +220,7 @@ module.exports = function defineGitCommitGraphSteps(reg) {
   reg.define(/^the commit row contains "([^"]+)"$/, (w, text) => {
     const rows = graphRows(w);
     assert.strictEqual(rows.length, 1, `expected exactly one commit row, got:\n${w.plain}`);
-    assert.ok(rows[0].row.includes(text),
+    assert.ok(rows[0].row.includes(String(text)),
       `"${text}" is missing from the commit row "${rows[0].row}"`);
   });
 };

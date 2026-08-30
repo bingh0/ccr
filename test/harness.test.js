@@ -250,7 +250,7 @@ test('tags attach to scenarios and inherit from the Feature', () => {
 test('deferred cleanup runs LIFO after the steps', async () => {
   const reg = new StepRegistry();
   /** @type {string[]} */ const order = [];
-  reg.define(/^acquire (\w+)$/, (w, name) => { w.defer(() => { order.push(name); }); });
+  reg.define(/^acquire (\w+)$/, (w, name) => { w.defer(() => { order.push(String(name)); }); });
   await executeSteps([
     { keyword: 'Given', text: 'acquire outer', line: 1 },
     { keyword: 'And', text: 'acquire inner', line: 2 },

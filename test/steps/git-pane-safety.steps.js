@@ -141,13 +141,13 @@ module.exports = function defineGitPaneSafetySteps(reg) {
 
   reg.define(/^the git pane is showing the repo "([^"]+)"$/, (w, name) => {
     world(w);
-    w.repo = buildWorkRepo(path.join(w.root, name), {
+    w.repo = buildWorkRepo(path.join(w.root, String(name)), {
       committed: { 'README.md': `# ${name}\n` },
     });
     target(w, w.repo);
     // The premise, checked: the pane really is up and naming this repo.
     const p = compose(w, GIT_VIEW).replace(/\x1b\[[0-9;]*m/g, '');
-    assert.ok((p.split('\n')[0] || '').includes(name),
+    assert.ok((p.split('\n')[0] || '').includes(String(name)),
       `the pane should be showing "${name}"; got:\n${p}`);
   });
 
@@ -194,7 +194,7 @@ module.exports = function defineGitPaneSafetySteps(reg) {
   });
 
   reg.define(/^the pane shows "([^"]+)"$/, (w, text) => {
-    assert.ok(w.plain.split('\n').some((/** @type {string} */ l) => l.includes(text)),
+    assert.ok(w.plain.split('\n').some((/** @type {string} */ l) => l.includes(String(text))),
       `"${text}" is missing from:\n${w.plain}`);
   });
 

@@ -30,21 +30,21 @@ module.exports = function defineGitIndexFormatSteps(reg) {
 
   reg.define(/^an index written at version (\d) with the paths "([^"]+)" and "([^"]+)"$/, (w, v, a, b) => {
     writeIndexV(gitDir(w), /** @type {2|3|4} */ (Number(v)),
-      [{ path: a, oid: OID }, { path: b, oid: OID }]);
+      [{ path: String(a), oid: OID }, { path: String(b), oid: OID }]);
   });
 
   reg.define(/^an index written at version 3 whose entry "([^"]+)" carries extended flags$/, (w, p) => {
-    writeIndexV(gitDir(w), 3, [{ path: p, oid: OID, extended: true }]);
+    writeIndexV(gitDir(w), 3, [{ path: String(p), oid: OID, extended: true }]);
   });
 
   reg.define(/^an index holding "([^"]+)" at stages 1, 2 and 3$/, (w, p) => {
-    writeIndexV(gitDir(w), 2, [1, 2, 3].map((stage) => ({ path: p, oid: OID, stage })));
+    writeIndexV(gitDir(w), 2, [1, 2, 3].map((stage) => ({ path: String(p), oid: OID, stage })));
   });
 
   reg.define(/^a sha-256 repository whose index holds "([^"]+)"$/, (w, p) => {
     fs.writeFileSync(path.join(gitDir(w), 'config'),
       '[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectformat = sha256\n');
-    writeIndexV(gitDir(w), 2, [{ path: p, oid: OID256 }]);
+    writeIndexV(gitDir(w), 2, [{ path: String(p), oid: OID256 }]);
   });
 
   reg.define(/^an index written at version 2 and then truncated mid-entry$/, (w) => {

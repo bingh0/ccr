@@ -138,14 +138,14 @@ module.exports = function defineGitRepoIdentitySteps(reg) {
   reg.define(/^the pane is (\d+) columns wide$/, (w, n) => { world(w).cols = Number(n); });
 
   reg.define(/^ccr was launched in the repo "([^"]+)" on branch "([^"]+)"$/, (w, repo, branch) => {
-    const dir = makeRepo(at(w, repo), { branch });
+    const dir = makeRepo(at(w, String(repo)), { branch: String(branch) });
     setLaunchDir(w, dir);
     // Until a scenario says the session moved, it is working where ccr started.
     setSessionDir(w, dir);
   });
 
   reg.define(/^ccr was launched in the repo "([^"]+)"$/, (w, repo) => {
-    const dir = makeRepo(at(w, repo));
+    const dir = makeRepo(at(w, String(repo)));
     setLaunchDir(w, dir);
     setSessionDir(w, dir);
   });
@@ -155,7 +155,7 @@ module.exports = function defineGitRepoIdentitySteps(reg) {
     // directory — no `.git` beneath it, which is exactly why the walk used to
     // pass straight over one. Built by hand like every other fixture here;
     // test/git-repo.test.js checks this layout against what real git produces.
-    const dir = at(w, repo);
+    const dir = at(w, String(repo));
     fs.mkdirSync(path.join(dir, 'refs', 'heads'), { recursive: true });
     fs.mkdirSync(path.join(dir, 'objects'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'HEAD'), 'ref: refs/heads/main\n');
@@ -166,14 +166,14 @@ module.exports = function defineGitRepoIdentitySteps(reg) {
   });
 
   reg.define(/^ccr was launched in the directory "([^"]+)"$/, (w, dir) => {
-    const d = at(w, dir);
+    const d = at(w, String(dir));
     fs.mkdirSync(d, { recursive: true });
     setLaunchDir(w, d);
     setSessionDir(w, d);
   });
 
   reg.define(/^the session is editing files in the repo "([^"]+)"$/, (w, repo) => {
-    setSessionDir(w, makeRepo(at(w, repo)));
+    setSessionDir(w, makeRepo(at(w, String(repo))));
   });
 
   reg.define(/^the repo has no branch checked out$/, (w) => {

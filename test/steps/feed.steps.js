@@ -26,7 +26,7 @@ module.exports = function defineFeedSteps(reg) {
   reg.define(/^a feed$/, (w) => { feed(w); });
   reg.define(/^a tool event "([^"]+)" with arg "([^"]+)"$/, (w, tool, arg) => {
     feed(w).events.push({ ts: 1, kind: 'tool', tool, arg });
-    feed(w).tools[tool] = (feed(w).tools[tool] || 0) + 1;
+    feed(w).tools[String(tool)] = (feed(w).tools[String(tool)] || 0) + 1;
   });
   reg.define(/^a command event "([^"]+)"$/, (w, cmd) => {
     feed(w).events.push({ ts: 1, kind: 'cmd', tool: cmd, arg: '' });
@@ -49,13 +49,13 @@ module.exports = function defineFeedSteps(reg) {
 
   // --- Assertions ---
   reg.define(/^the feed shows "([^"]+)" with "([^"]+)"$/, (w, tool, arg) => {
-    assert.ok(w.lines.some((/** @type {string} */ l) => l.includes(tool) && l.includes(arg)), `expected a line with "${tool}" and "${arg}" in:\n${w.out}`);
+    assert.ok(w.lines.some((/** @type {string} */ l) => l.includes(String(tool)) && l.includes(String(arg))), `expected a line with "${tool}" and "${arg}" in:\n${w.out}`);
   });
   reg.define(/^the header line contains "([^"]+)"$/, (w, s) => {
     assert.ok(w.lines[0] && w.lines[0].includes(s), `header "${w.lines[0]}" lacks "${s}"`);
   });
   reg.define(/^the feed shows a command "([^"]+)"$/, (w, cmd) => {
-    assert.ok(w.lines.some((/** @type {string} */ l) => l.includes('⌘') && l.includes(cmd)), `expected command "${cmd}" in:\n${w.out}`);
+    assert.ok(w.lines.some((/** @type {string} */ l) => l.includes('⌘') && l.includes(String(cmd))), `expected command "${cmd}" in:\n${w.out}`);
   });
   reg.define(/^the feed shows (\d+) event lines$/, (w, n) => {
     const evLines = w.lines.filter((/** @type {string} */ l) => /^\s+(↳|⌘)/.test(l));

@@ -14,6 +14,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const slots = require('../../src/instance-slot');
+const { DataTable } = require('../gherkin');
 
 const CCR_JS = path.join(__dirname, '..', '..', 'bin', 'ccr.js');
 const DEAD_PID = 0x7ffffff0;
@@ -165,8 +166,13 @@ module.exports = function defineInstancePersistenceSteps(reg) {
     assert.ok(fs.existsSync(path.join(ccr(w), `burnlog-${sid}.jsonl`)));
   });
 
+  // The corpus's ONE step with a data table, so the DataTable arm of the
+  // capture union is real here and nowhere else. Narrowed rather than cast:
+  // if the table is ever dropped from the feature, this says which step lost
+  // it instead of failing on a missing method three lines down.
   reg.define(/^the account's session log maps "([^"]+)" to$/, (w, sid, table) => {
-    const open = logLines(w, sid)[0];
+    if (!(table instanceof DataTable)) throw new TypeError('this step is bound to a data table');
+    const open = logLines(w, String(sid))[0];
     const want = table.rowsHash();
     assert.strictEqual(open.name, want.name);
     assert.strictEqual(open.profile, want.profile);
@@ -175,12 +181,12 @@ module.exports = function defineInstancePersistenceSteps(reg) {
   });
 
   reg.define(/^the session log's entry for "([^"]+)" is marked ended$/, (w, sid) => {
-    const lines = logLines(w, sid);
+    const lines = logLines(w, String(sid));
     assert.ok(lines.some((l) => typeof l.ended === 'number'), JSON.stringify(lines));
   });
 
   reg.define(/^the session log's entry for "([^"]+)" is marked swept$/, (w, sid) => {
-    const lines = logLines(w, sid);
+    const lines = logLines(w, String(sid));
     assert.ok(lines.some((l) => typeof l.swept === 'number'), JSON.stringify(lines));
   });
 

@@ -132,7 +132,7 @@ module.exports = function defineInstanceSlotsSteps(reg) {
   });
 
   reg.define(/^ccr picks its namespace for CCS profile "([^"]+)"$/, (w, profile) => {
-    w.slot = slots.allocateSlot({ profile, env: w.env, home: home(w) });
+    w.slot = slots.allocateSlot({ profile: String(profile), env: w.env, home: home(w) });
   });
 
   reg.define(/^two launchers pick a namespace against the same free slot$/, (w) => {

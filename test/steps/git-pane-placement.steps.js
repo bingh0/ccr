@@ -256,7 +256,7 @@ module.exports = function defineGitPanePlacementSteps(reg) {
       // A repository with a readable object store, not just a HEAD: this
       // scenario counts CHANGES, and a change count only exists where the
       // index and HEAD tree can actually be compared.
-      const repo = buildWorkRepo(path.join(w.home, 'trees', name), {
+      const repo = buildWorkRepo(path.join(w.home, 'trees', String(name)), {
         committed: { 'README.md': `# ${name}\n` },
       });
       recordLaunchDir(slot.stateDir, repo);
@@ -284,7 +284,7 @@ module.exports = function defineGitPanePlacementSteps(reg) {
       }
       inst.seeded = true;
     }
-    const p = paneOf(w, name).plain;
+    const p = paneOf(w, String(name)).plain;
     const line = p.split('\n').map((/** @type {string} */ l) => l.trim()).find((/** @type {string} */ l) => /^\d+\+? changes?$/.test(l));
     assert.strictEqual(line, `${n} changes`,
       `the pane for "${name}" should count ${n} changes; its counts row reads ${JSON.stringify(line)}:\n${p}`);

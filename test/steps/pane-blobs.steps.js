@@ -191,8 +191,8 @@ module.exports = function definePaneBlobsSteps(reg) {
 
   reg.define(/^the golden fixture blob at the configured path$/, (w) => { writeBlob(w, GOLDEN); });
   reg.define(/^the pane shows the title "([^"]+)" and the tool "([^"]+)"$/, (w, title, tool) => {
-    assert.match(w.plain, new RegExp(title));
-    assert.match(w.plain, new RegExp(tool));
+    assert.match(w.plain, new RegExp(String(title)));
+    assert.match(w.plain, new RegExp(String(tool)));
   });
   reg.define(/^all seven rows render in blob order$/, (w) => {
     const labels = GOLDEN.rows.map((/** @type {any} */ r) => r.label);
@@ -203,9 +203,9 @@ module.exports = function definePaneBlobsSteps(reg) {
     assert.deepStrictEqual(positions, sorted, 'rows render in blob order');
   });
   reg.define(/^the row "([^"]+)" shows "([^"]+)" with the alert light$/, (w, label, value) => {
-    const line = w.frame.split('\n').find((/** @type {string} */ l) => plain(l).includes(label));
+    const line = w.frame.split('\n').find((/** @type {string} */ l) => plain(l).includes(String(label)));
     assert.ok(line, `row ${label} present`);
-    assert.match(plain(line), new RegExp(value));
+    assert.match(plain(line), new RegExp(String(value)));
     assert.ok(line.includes(RED), 'alert renders red');
   });
 
@@ -218,7 +218,7 @@ module.exports = function definePaneBlobsSteps(reg) {
     fs.utimesSync(w.blobPath, when / 1000, when / 1000);
   });
   reg.define(/^the pane chrome shows "([^"]+)" and "([^"]+)" unparsed$/, (w, label, at) => {
-    assert.match(w.plain, new RegExp(label));
+    assert.match(w.plain, new RegExp(String(label)));
     // Verbatim: ccr never reformats basis.at, so the exact string survives.
     assert.ok(w.plain.includes(at), `basis.at must render verbatim, got: ${w.plain}`);
   });
@@ -269,13 +269,13 @@ module.exports = function definePaneBlobsSteps(reg) {
   const lineFor = (/** @type {Record<string, any>} */ w, /** @type {string} */ label) =>
     w.frame.split('\n').find((/** @type {string} */ l) => plain(l).includes(label));
   reg.define(/^the row "([^"]+)" shows the dark marker$/, (w, label) => {
-    const line = lineFor(w, label);
+    const line = lineFor(w, String(label));
     assert.ok(line, `row ${label} present`);
     assert.ok(plain(line).includes('◌'), 'dark uses its own hollow marker');
     assert.ok(!line.includes(GREEN), 'dark is never green');
   });
   reg.define(/^the row "([^"]+)" shows the dim off render$/, (w, label) => {
-    const line = lineFor(w, label);
+    const line = lineFor(w, String(label));
     assert.ok(line, `row ${label} present`);
     assert.ok(line.includes('\x1b[2m'), 'off renders dim');
     assert.ok(!line.includes(GREEN), 'off is never green');

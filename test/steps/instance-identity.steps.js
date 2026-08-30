@@ -105,16 +105,16 @@ module.exports = function defineInstanceIdentitySteps(reg) {
   // --- Givens ---
 
   reg.define(/^a bare ccr launched from repository "([^"]+)"$/, (w, name) => {
-    w.launchCwd = makeRepo(w, name);
+    w.launchCwd = makeRepo(w, String(name));
   });
 
   reg.define(/^ccr launched with CCS profile "cc1" from repository "([^"]+)"$/, (w, name) => {
-    w.launchCwd = makeRepo(w, name);
+    w.launchCwd = makeRepo(w, String(name));
     w.profileArgs = ['cc1'];
   });
 
   reg.define(/^ccr launched from repository "([^"]+)" with --name "([^"]+)"$/, (w, repo, name) => {
-    w.launchCwd = makeRepo(w, repo);
+    w.launchCwd = makeRepo(w, String(repo));
     w.nameArgs = ['--name', name];
   });
 
@@ -131,16 +131,16 @@ module.exports = function defineInstanceIdentitySteps(reg) {
 
   reg.define(/^an instance named "([^"]+)" launched in repository "([^"]+)"$/, (w, name, repo) => {
     w.name = name;
-    w.launchCwd = makeRepo(w, repo);
+    w.launchCwd = makeRepo(w, String(repo));
   });
 
   reg.define(/^an instance named "([^"]+)" in repository "([^"]+)"$/, (w, name, repo) => {
     w.name = name;
-    w.launchCwd = makeRepo(w, repo);
+    w.launchCwd = makeRepo(w, String(repo));
   });
 
   reg.define(/^the session has changed directory into repository "([^"]+)"$/, (w, repo) => {
-    w.currentCwd = makeRepo(w, repo);
+    w.currentCwd = makeRepo(w, String(repo));
   });
 
   reg.define(/^the binding window has 20 minutes left$/, (w) => {

@@ -76,7 +76,7 @@ module.exports = function defineInstanceResolutionSteps(reg) {
   reg.define(/^instance "([^"]+)" is live and was launched in the current directory$/, (w, name) => {
     w.cwd = path.join(home(w), 'here');
     fs.mkdirSync(w.cwd, { recursive: true });
-    liveInstance(w, name, w.cwd);
+    liveInstance(w, String(name), w.cwd);
   });
 
   reg.define(/^CCR_STATE_DIR names instance "b"'s state dir$/, (w) => {
@@ -85,11 +85,11 @@ module.exports = function defineInstanceResolutionSteps(reg) {
   });
 
   reg.define(/^instance "([^"]+)" was launched in "([^"]+)"$/, (w, name, where) => {
-    liveInstance(w, name, at(w, where));
+    liveInstance(w, String(name), at(w, String(where)));
   });
 
   reg.define(/^the current directory is "([^"]+)"$/, (w, where) => {
-    w.cwd = at(w, where);
+    w.cwd = at(w, String(where));
     fs.mkdirSync(w.cwd, { recursive: true });
   });
 
@@ -103,12 +103,12 @@ module.exports = function defineInstanceResolutionSteps(reg) {
   });
 
   reg.define(/^instances "([^"]+)" and "([^"]+)" are live$/, (w, a, b) => {
-    liveInstance(w, a);
-    liveInstance(w, b);
+    liveInstance(w, String(a));
+    liveInstance(w, String(b));
   });
 
   reg.define(/^instance "([^"]+)" is live$/, (w, name) => {
-    liveInstance(w, name);
+    liveInstance(w, String(name));
   });
 
   reg.define(/^the current directory is inside "main-work"'s launch directory$/, (w) => {
@@ -124,12 +124,12 @@ module.exports = function defineInstanceResolutionSteps(reg) {
 
   reg.define(/^ccr economy resolves its instance$/, (w) => { runCcr(w, ['economy']); });
 
-  reg.define(/^ccr economy runs with -i "([^"]+)"$/, (w, name) => { runCcr(w, ['economy', '-i', name]); });
+  reg.define(/^ccr economy runs with -i "([^"]+)"$/, (w, name) => { runCcr(w, ['economy', '-i', String(name)]); });
 
   reg.define(/^ccr economy runs$/, (w) => { runCcr(w, ['economy']); });
 
   reg.define(/^ccr (resume|doctor|statusline|launch) runs with -i "([^"]+)"$/, (w, cmd, name) => {
-    runCcr(w, [cmd, '-i', name]);
+    runCcr(w, [String(cmd), '-i', String(name)]);
   });
 
   // --- Thens ---

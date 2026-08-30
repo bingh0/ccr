@@ -52,11 +52,11 @@ module.exports = function defineEconomySteps(reg) {
   reg.define(/^a subscription session on model "([^"]+)" with a 1\.0M context window$/, (w, model) => {
     w.view = w.view || {}; w.view.model = model; w.view.windowSize = 1000000;
   });
-  reg.define(/^the 5h window is (\d+)% used and resets in (.+)$/, (w, used, dur) => setWindow(w, '5h', '5h', used, dur, 300));
-  reg.define(/^the weekly window is (\d+)% used and resets in (.+)$/, (w, used, dur) => setWindow(w, 'weekly', 'weekly', used, dur, 10080));
-  reg.define(/^a Sonnet-only weekly bucket is (\d+)% used and resets in (.+)$/, (w, used, dur) => setWindow(w, 'seven_day_sonnet', 'weekly · Sonnet', used, dur, 10080));
+  reg.define(/^the 5h window is (\d+)% used and resets in (.+)$/, (w, used, dur) => setWindow(w, '5h', '5h', String(used), String(dur), 300));
+  reg.define(/^the weekly window is (\d+)% used and resets in (.+)$/, (w, used, dur) => setWindow(w, 'weekly', 'weekly', String(used), String(dur), 10080));
+  reg.define(/^a Sonnet-only weekly bucket is (\d+)% used and resets in (.+)$/, (w, used, dur) => setWindow(w, 'seven_day_sonnet', 'weekly · Sonnet', String(used), String(dur), 10080));
   reg.define(/^the only bucket present is the 5h window at (\d+)% used resetting in (.+)$/, (w, used, dur) => {
-    w.view = w.view || {}; w.view.windows = [{ key: '5h', label: '5h', usedPct: Number(used), minutesToReset: parseDur(dur), windowMinutes: 300 }];
+    w.view = w.view || {}; w.view.windows = [{ key: '5h', label: '5h', usedPct: Number(used), minutesToReset: parseDur(String(dur)), windowMinutes: 300 }];
   });
   reg.define(/^the live context is (\d+)K tokens$/, (w, k) => {
     w.view = w.view || {}; w.view.contextTokens = Number(k) * 1000; w.view.cachedPct = 80;
@@ -72,7 +72,7 @@ module.exports = function defineEconomySteps(reg) {
   // Fractional used% gets its own phrasing so it can never collide with the
   // integer "is N% used" setters — the harness rejects ambiguous step patterns.
   reg.define(/^the 5h window's raw used_percentage is ([\d.]+), resetting in (.+)$/,
-    (w, used, dur) => setWindow(w, '5h', '5h', used, dur, 300));
+    (w, used, dur) => setWindow(w, '5h', '5h', String(used), String(dur), 300));
   reg.define(/^the snapshot was captured (\d+) minutes? ago$/, (w, min) => { w.ageMs = Number(min) * 60000; });
 
   // --- Action ---
@@ -126,7 +126,7 @@ module.exports = function defineEconomySteps(reg) {
 
   // --- Used vs left labels ---
   reg.define(/^the "([^"]+)" line is labelled as used, not left$/, (w, meter) => {
-    const row = meterRow(w, meter);
+    const row = meterRow(w, String(meter));
     assert.match(row, /\d+% used/, `${meter} shows "% used"`);
     assert.ok(!/\d+% left/.test(row), `${meter} must not show "% left"`);
   });
@@ -150,7 +150,7 @@ module.exports = function defineEconomySteps(reg) {
 
   // --- Graceful multi-bucket handling ---
   reg.define(/^a "([^"]+)" meter is shown$/, (w, label) => {
-    const needle = label.replace(/.*·\s*/, '').trim() || label;
+    const needle = String(label).replace(/.*·\s*/, '').trim() || String(label);
     assert.ok(w.meterLines.some((/** @type {string} */ l) => l.includes(needle)), `expected a meter for "${label}"`);
   });
   reg.define(/^the screen renders without error$/, (w) => {

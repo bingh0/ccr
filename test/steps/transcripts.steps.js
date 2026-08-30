@@ -57,8 +57,8 @@ module.exports = function defineTranscriptSteps(reg) {
     assert.ok(hit, `expected a ${tool} event with arg "${arg}"; got ${JSON.stringify(w.parsed.events)}`);
   });
   reg.define(/^the tool counts show "([^"]+)" once and "([^"]+)" once$/, (w, a, b) => {
-    assert.strictEqual(w.parsed.stats.tools[a], 1, `${a} once`);
-    assert.strictEqual(w.parsed.stats.tools[b], 1, `${b} once`);
+    assert.strictEqual(w.parsed.stats.tools[String(a)], 1, `${a} once`);
+    assert.strictEqual(w.parsed.stats.tools[String(b)], 1, `${b} once`);
   });
   reg.define(/^the feed includes a command "([^"]+)"$/, (w, cmd) => {
     const hit = w.parsed.events.find((/** @type {any} */ e) => e.kind === 'cmd' && e.tool === cmd);
@@ -92,7 +92,7 @@ module.exports = function defineTranscriptSteps(reg) {
   // --- Then: robustness + snapshot path confinement ---
   reg.define(/^parsing does not throw$/, (w) => assert.ok(w.parsed && Array.isArray(w.parsed.events)));
   reg.define(/^the resolved transcript path is "([^"]+)"$/, (w, p) =>
-    assert.strictEqual(currentTranscriptPath(w.snapshot, w.tbase), path.resolve(p)));
+    assert.strictEqual(currentTranscriptPath(w.snapshot, w.tbase), path.resolve(String(p))));
   reg.define(/^the transcript path is rejected$/, (w) =>
     assert.strictEqual(currentTranscriptPath(w.snapshot, w.tbase), null));
 };

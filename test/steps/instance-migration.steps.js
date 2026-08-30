@@ -83,8 +83,8 @@ module.exports = function defineInstanceMigrationSteps(reg) {
   });
 
   reg.define(/^a ccr home in the 0\.3 layout holding profile dir "([^"]+)" with burnlog "([^"]+)" and a captured status$/, (w, name, log) => {
-    const dir = path.join(ccr(w), name);
-    put(dir, log, '{"t":1}\n');
+    const dir = path.join(ccr(w), String(name));
+    put(dir, String(log), '{"t":1}\n');
     put(dir, 'last-status.json', '{}');
     put(dir, 'exited', '');
   });
@@ -92,7 +92,7 @@ module.exports = function defineInstanceMigrationSteps(reg) {
   reg.define(/^a ccr home in the 0\.3 layout holding a loose captured status and burnlog "([^"]+)"$/, (w, log) => {
     put(ccr(w), 'last-status.json', '{}');
     put(ccr(w), 'exited', '');
-    put(ccr(w), log, '{"t":1}\n');
+    put(ccr(w), String(log), '{"t":1}\n');
   });
 
   reg.define(/^a live 0\.3 instance is running$/, (w) => {
@@ -108,7 +108,7 @@ module.exports = function defineInstanceMigrationSteps(reg) {
   });
 
   reg.define(/^burnlog "([^"]+)" is at the container's top level$/, (w, log) => {
-    put(ccr(w), log, '{"t":1}\n');
+    put(ccr(w), String(log), '{"t":1}\n');
   });
 
   reg.define(/^a migration that was interrupted before writing the "\.layout" marker$/, (w) => {
@@ -117,12 +117,12 @@ module.exports = function defineInstanceMigrationSteps(reg) {
   });
 
   reg.define(/^profile dir "([^"]+)" still holds burnlog "([^"]+)"$/, (w, name, log) => {
-    put(path.join(ccr(w), name), log, '{"t":1}\n');
+    put(path.join(ccr(w), String(name)), String(log), '{"t":1}\n');
   });
 
   reg.define(/^a ccr home in the 0\.3 layout with an unrecognized entry named "([^"]+)"$/, (w, name) => {
     put(path.join(ccr(w), 'cq'), 'burnlog-xyz01.jsonl', '{"t":1}\n');
-    fs.mkdirSync(path.join(ccr(w), name), { recursive: true });
+    fs.mkdirSync(path.join(ccr(w), String(name)), { recursive: true });
     w.before = snapshot(w);
   });
 
@@ -130,7 +130,7 @@ module.exports = function defineInstanceMigrationSteps(reg) {
     put(ccr(w), 'last-status.json', '{}');
     put(ccr(w), 'exited', '');
     put(ccr(w), 'burnlog-mixed01.jsonl', '{"t":1}\n');
-    put(ccr(w), name, '{"session_id":"abc123"}\n');
+    put(ccr(w), String(name), '{"session_id":"abc123"}\n');
   });
 
   reg.define(/^a migrated ccr home where a 0\.3 ccr later wrote a loose captured status and heartbeat$/, (w) => {
@@ -161,15 +161,15 @@ module.exports = function defineInstanceMigrationSteps(reg) {
   // --- Thens ---
 
   reg.define(/^"([^"]+)" is at the container's top level$/, (w, log) => {
-    assert.ok(fs.existsSync(path.join(ccr(w), log)), `${log} should have been harvested to the container root`);
+    assert.ok(fs.existsSync(path.join(ccr(w), String(log))), `${log} should have been harvested to the container root`);
   });
 
   reg.define(/^"([^"]+)" is still at the container's top level$/, (w, log) => {
-    assert.ok(fs.existsSync(path.join(ccr(w), log)));
+    assert.ok(fs.existsSync(path.join(ccr(w), String(log))));
   });
 
   reg.define(/^the profile dir "([^"]+)" is gone$/, (w, name) => {
-    assert.strictEqual(fs.existsSync(path.join(ccr(w), name)), false);
+    assert.strictEqual(fs.existsSync(path.join(ccr(w), String(name))), false);
   });
 
   reg.define(/^the "\.layout" marker is present$/, (w) => {

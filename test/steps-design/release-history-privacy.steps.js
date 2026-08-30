@@ -48,24 +48,24 @@ module.exports = function defineReleaseHistoryPrivacySteps(reg) {
 
   reg.define(/^the private pattern "([^"]+)"$/, (w, src) => {
     gitDir(w);
-    w.privatePatterns.push(new RegExp(src, 'i'));
+    w.privatePatterns.push(new RegExp(String(src), 'i'));
   });
 
   reg.define(/^a published commit whose tree holds "([^"]+)" saying "([^"]+)"$/, (w, name, text) => {
-    w.published = commitWith(w, name, Buffer.from(text), 'published');
+    w.published = commitWith(w, String(name), Buffer.from(String(text)), 'published');
     w.tip = w.published;
   });
 
   reg.define(/^an unpublished commit whose tree holds "([^"]+)" saying "([^"]+)"$/, (w, name, text) => {
-    w.tip = commitWith(w, name, Buffer.from(text), 'unpublished');
+    w.tip = commitWith(w, String(name), Buffer.from(String(text)), 'unpublished');
   });
 
   reg.define(/^an unpublished commit whose tree holds a binary "([^"]+)" containing "([^"]+)"$/, (w, name, text) => {
     // A NUL inside the sniff window is what makes it binary; the string is
     // present in full, so a scanner that ignored the NUL would report it.
-    w.tip = commitWith(w, name, Buffer.concat([
+    w.tip = commitWith(w, String(name), Buffer.concat([
       Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x00]),
-      Buffer.from(text),
+      Buffer.from(String(text)),
     ]), 'unpublished binary');
   });
 
@@ -75,7 +75,7 @@ module.exports = function defineReleaseHistoryPrivacySteps(reg) {
       // stays byte-identical — which is the case the scanner must attribute to
       // all of them rather than to whichever it reached first.
       for (let i = 0; i < Number(count); i += 1) {
-        w.tip = commitWith(w, name, Buffer.from(text), `unpublished ${i + 1}`);
+        w.tip = commitWith(w, String(name), Buffer.from(String(text)), `unpublished ${i + 1}`);
       }
     });
 

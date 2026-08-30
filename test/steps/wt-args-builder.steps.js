@@ -33,7 +33,7 @@ function build(/** @type {Record<string, any>} */ w) {
 module.exports = function defineWtArgsBuilderSteps(reg) {
   // Givens (canonical scenario)
   reg.define(/^node resolves to "([^"]+)"$/, (w, v) => { w.node = v; });
-  reg.define(/^ccrJs resolves to the packaged "([^"]+)"$/, (w, v) => { w.ccrJs = 'C:\\repo\\' + v.replace(/\//g, '\\'); });
+  reg.define(/^ccrJs resolves to the packaged "([^"]+)"$/, (w, v) => { w.ccrJs = 'C:\\repo\\' + String(v).replace(/\//g, '\\'); });
   reg.define(/^the state dir is "([^"]+)"$/, (w, v) => { w.stateDir = v; });
   reg.define(/^the settings file is "([^"]+)"$/, (w, v) => { w.settingsFile = v; });
   reg.define(/^the Claude command is "([^"]+)"$/, (w, v) => { w.ccCmd = v; });

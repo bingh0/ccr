@@ -41,20 +41,20 @@ module.exports = function defineGitObjectStoreSteps(reg) {
   // ── Given ─────────────────────────────────────────────────────────────────
 
   reg.define(/^a loose blob "([^"]+)"$/, (w, text) => {
-    w.oid = writeLoose(gitDir(w), 'blob', Buffer.from(text));
+    w.oid = writeLoose(gitDir(w), 'blob', Buffer.from(String(text)));
   });
 
   reg.define(/^a pack holding a blob "([^"]+)"$/, (w, text) => {
-    const data = Buffer.from(text);
+    const data = Buffer.from(String(text));
     w.oid = frame('blob', data).oid;
     writePack(gitDir(w), [{ type: 3, data, oid: w.oid }]);
   });
 
   reg.define(/^a pack whose blob "([^"]+)" has an ofs-delta extending it with "([^"]+)"$/,
-    (w, baseText, suffix) => packWithDelta(w, baseText, suffix, 6));
+    (w, baseText, suffix) => packWithDelta(w, String(baseText), String(suffix), 6));
 
   reg.define(/^a pack whose blob "([^"]+)" has a ref-delta extending it with "([^"]+)"$/,
-    (w, baseText, suffix) => packWithDelta(w, baseText, suffix, 7));
+    (w, baseText, suffix) => packWithDelta(w, String(baseText), String(suffix), 7));
 
   reg.define(/^an empty object store$/, (w) => {
     gitDir(w);
@@ -82,8 +82,8 @@ module.exports = function defineGitObjectStoreSteps(reg) {
   reg.define(/^a repository whose HEAD commit holds "([^"]+)" and "([^"]+)"$/, (w, a, b) => {
     const g = gitDir(w);
     w.blobOids = {
-      [a]: frame('blob', Buffer.from(`content of ${a}`)).oid,
-      [b]: frame('blob', Buffer.from(`content of ${b}`)).oid,
+      [String(a)]: frame('blob', Buffer.from(`content of ${a}`)).oid,
+      [String(b)]: frame('blob', Buffer.from(`content of ${b}`)).oid,
     };
     const files = new Map(Object.entries(w.blobOids).map(([p, oid]) => [p, { oid, mode: 0o100644 }]));
     const commit = writeCommit(g, writeTrees(g, files));
@@ -127,6 +127,6 @@ module.exports = function defineGitObjectStoreSteps(reg) {
   reg.define(/^it maps "([^"]+)" to that file's blob id$/, (w, p) => {
     const got = w.tree.get(p);
     assert.ok(got, `"${p}" is not in the flattened tree`);
-    assert.strictEqual(got.oid, w.blobOids[p]);
+    assert.strictEqual(got.oid, w.blobOids[String(p)]);
   });
 };

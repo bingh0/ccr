@@ -34,7 +34,7 @@ module.exports = function defineWindowsLauncherSteps(reg) {
 
   // When
   reg.define(/^I run "ccr"$/, (w) => runLauncher(w, undefined));
-  reg.define(/^I run "ccr (.+)"$/, (w, profile) => runLauncher(w, profile));
+  reg.define(/^I run "ccr (.+)"$/, (w, profile) => runLauncher(w, String(profile)));
 
   // Then — the split window
   reg.define(/^exactly one Windows Terminal window opens with two panes$/, (w) => {

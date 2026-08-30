@@ -77,15 +77,15 @@ module.exports = function defineGitWorkingTreeSteps(reg) {
   });
 
   reg.define(/^the repo has the staged file "([^"]+)"$/, (w, p) => {
-    spec(w).staged = { ...spec(w).staged, [p]: `staged content of ${p}\n` };
+    spec(w).staged = { ...spec(w).staged, [String(p)]: `staged content of ${p}\n` };
   });
 
   reg.define(/^the repo has the modified file "([^"]+)"$/, (w, p) => {
-    spec(w).modified = { ...spec(w).modified, [p]: [COMMITTED, EDITED] };
+    spec(w).modified = { ...spec(w).modified, [String(p)]: [COMMITTED, EDITED] };
   });
 
   reg.define(/^the repo has the untracked file "([^"]+)"$/, (w, p) => {
-    spec(w).untracked = { ...spec(w).untracked, [p]: `untracked content of ${p}\n` };
+    spec(w).untracked = { ...spec(w).untracked, [String(p)]: `untracked content of ${p}\n` };
   });
 
   reg.define(/^the repo has no staged, modified or untracked files$/, (w) => {
@@ -149,7 +149,7 @@ module.exports = function defineGitWorkingTreeSteps(reg) {
   });
 
   reg.define(/^the pane shows "([^"]+)"$/, (w, text) => {
-    assert.ok(w.lines.some((/** @type {string} */ l) => l.trim() === text || l.includes(text)),
+    assert.ok(w.lines.some((/** @type {string} */ l) => l.trim() === text || l.includes(String(text))),
       `"${text}" is missing from:\n${w.plain}`);
   });
 

@@ -71,12 +71,12 @@ module.exports = function defineVscodeSidecarSteps(reg) {
   // When
   reg.define(/^I run "ccr"$/, (w) => { w.code = vscode.run(undefined, deps(w)); });
   reg.define(/^I run "ccr" on "([^"]+)"$/, (w, osName) => {
-    w.platform = /** @type {Record<string, string>} */ (OS)[osName] || osName;
+    w.platform = /** @type {Record<string, string>} */ (OS)[String(osName)] || osName;
     w.code = vscode.run(undefined, deps(w));
   });
   reg.define(/^I run "ccr" and Claude exits$/, (w) => { w.code = vscode.run(undefined, deps(w)); });
   reg.define(/^I run "ccr sidecar --hint"$/, (w) => { w.code = vscode.hint(path.join(w.home || '/home/me', '.ccr'), deps(w)); });
-  reg.define(/^I run "ccr ([A-Za-z0-9._-]+)"$/, (w, profile) => { w.code = vscode.run(profile, deps(w)); });
+  reg.define(/^I run "ccr ([A-Za-z0-9._-]+)"$/, (w, profile) => { w.code = vscode.run(String(profile), deps(w)); });
 
   // Then
   reg.define(/^Claude starts in the current pane via `claude --settings <temp-file>`$/, (w) => {

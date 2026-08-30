@@ -136,7 +136,7 @@ module.exports = function defineInstanceNamingSteps(reg) {
   });
 
   reg.define(/^the launch directory's basename is "([^"]+)"$/, (w, basename) => {
-    w.cwd = launchDirNamed(w, basename);
+    w.cwd = launchDirNamed(w, String(basename));
   });
 
   reg.define(/^the launch takes slot 2$/, (w) => {
@@ -144,11 +144,11 @@ module.exports = function defineInstanceNamingSteps(reg) {
   });
 
   reg.define(/^a live instance named "([^"]+)"$/, (w, name) => {
-    liveInstance(w, name);
+    liveInstance(w, String(name));
   });
 
   reg.define(/^a live instance named "([^"]+)" on slot (\d+)$/, (w, name, n) => {
-    liveInstance(w, name, Number(n));
+    liveInstance(w, String(name), Number(n));
   });
 
   reg.define(/^live instances named "gitrepo" and "gitrepo2" through "gitrepo9"$/, (w) => {
@@ -171,21 +171,21 @@ module.exports = function defineInstanceNamingSteps(reg) {
   reg.define(/^a bare ccr launches$/, (w) => { runCcr(w); });
 
   reg.define(/^a bare ccr launches from another directory also named "([^"]+)"$/, (w, basename) => {
-    w.cwd = launchDirNamed(w, basename);
+    w.cwd = launchDirNamed(w, String(basename));
     runCcr(w);
   });
 
   reg.define(/^a bare ccr launches from a directory named "([^"]+)"$/, (w, basename) => {
-    w.cwd = launchDirNamed(w, basename);
+    w.cwd = launchDirNamed(w, String(basename));
     runCcr(w);
   });
 
   reg.define(/^ccr launches with --name "([^"]+)"$/, (w, name) => {
-    runCcr(w, ['--name', name]);
+    runCcr(w, ['--name', String(name)]);
   });
 
   reg.define(/^ccr launches with positional "cc1" and --name "([^"]+)"$/, (w, name) => {
-    runCcr(w, ['cc1', '--name', name]);
+    runCcr(w, ['cc1', '--name', String(name)]);
   });
 
   // --- Thens ---

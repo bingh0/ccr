@@ -39,7 +39,7 @@ module.exports = function defineGitWorkingTreeRulesSteps(reg) {
 
   reg.define(/^a repo whose committed file "([^"]+)" holds "([^"]+)"$/, (w, p, content) => {
     world(w);
-    buildWorkRepo(w.repo, { committed: { [p]: content } });
+    buildWorkRepo(w.repo, { committed: { [String(p)]: String(content) } });
   });
 
   reg.define(/^the working copy of "([^"]+)" was edited to "([^"]+)" at a new timestamp$/, (w, p, content) => {
@@ -47,15 +47,15 @@ module.exports = function defineGitWorkingTreeRulesSteps(reg) {
     // sees a matching size and a changed time, and only the content hash can
     // answer. The scenario fails if the sizes accidentally diverge, because
     // then it would no longer be testing what it names.
-    const file = path.join(w.repo, p);
-    assert.strictEqual(Buffer.byteLength(content), fs.statSync(file).size,
+    const file = path.join(w.repo, String(p));
+    assert.strictEqual(Buffer.byteLength(String(content)), fs.statSync(file).size,
       'fixture: the edit must keep the size, or the stat path answers first');
-    fs.writeFileSync(file, content);
+    fs.writeFileSync(file, String(content));
   });
 
   reg.define(/^the working copy of "([^"]+)" was touched without changing it$/, (w, p) => {
     const now = Date.now() / 1000;
-    fs.utimesSync(path.join(w.repo, p), now, now);
+    fs.utimesSync(path.join(w.repo, String(p)), now, now);
   });
 
   reg.define(/^a repo ignoring "([^"]+)"$/, (w, pattern) => {
@@ -75,7 +75,7 @@ module.exports = function defineGitWorkingTreeRulesSteps(reg) {
   });
 
   reg.define(/^the directory "([^"]+)" re-includes "([^"]+)" in its own \.gitignore$/, (w, dir, pattern) => {
-    const sub = path.join(w.repo, dir);
+    const sub = path.join(w.repo, String(dir));
     fs.mkdirSync(sub, { recursive: true });
     fs.writeFileSync(path.join(sub, '.gitignore'), '!' + pattern + '\n');
     // Deliberately untracked and unignored: it shows as "?", and the Thens
@@ -90,7 +90,7 @@ module.exports = function defineGitWorkingTreeRulesSteps(reg) {
   });
 
   reg.define(/^the working tree holds the file "([^"]+)"$/, (w, p) => {
-    const abs = path.join(world(w).repo, p);
+    const abs = path.join(world(w).repo, String(p));
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, `content of ${p}\n`);
   });
@@ -101,7 +101,7 @@ module.exports = function defineGitWorkingTreeRulesSteps(reg) {
     // one shape the high-level builder deliberately cannot express.
     bareBones(w);
     const oid = blobOid(`content of ${p}\n`);
-    const commit = writeCommit(w.gitDir, writeTrees(w.gitDir, new Map([[p, { oid, mode: 0o100644 }]])));
+    const commit = writeCommit(w.gitDir, writeTrees(w.gitDir, new Map([[String(p), { oid, mode: 0o100644 }]])));
     fs.writeFileSync(path.join(w.gitDir, 'refs', 'heads', 'main'), commit + '\n');
     writeIndex(w.gitDir, []);
   });

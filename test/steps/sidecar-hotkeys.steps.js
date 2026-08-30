@@ -107,7 +107,7 @@ module.exports = function defineSidecarHotkeysSteps(reg) {
   /** @type {Record<string, string>} */
   const F3 = { SS3: '\x1bOR', 'linux-console': '\x1b[[C', 'csi-tilde': '\x1b[13~' };
   reg.define(/^F3 arrives in the (\S+) encoding$/, (w, name) => {
-    const seq = F3[name];
+    const seq = F3[String(name)];
     assert.ok(seq, `no F3 sequence named ${name}`);
     assert.ok(keys.CYCLE_KEYS.includes(seq), `${name} is not a cycle key`);
     w.stdin.type(seq);
@@ -143,7 +143,7 @@ module.exports = function defineSidecarHotkeysSteps(reg) {
 
   reg.define(/^ccr is run with "([^"]+)"$/, (w, argline) => {
     try {
-      execFileSync(process.execPath, [CCR_JS, ...argline.split(' ')],
+      execFileSync(process.execPath, [CCR_JS, ...String(argline).split(' ')],
         { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20000 });
       w.cli = { code: 0, stderr: '' };
     } catch (e) {
