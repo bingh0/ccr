@@ -1,12 +1,14 @@
 // @ts-check
 // test/gherkin.js
 //
-// Vendored copy of gherkin-node-test@0.11.0 (MIT — github.com/bingh0/gherkin-node-test,
-// npm: gherkin-node-test). That package is the canonical source; this copy is kept
-// in-tree so ccr's acceptance suite runs on a bare `node --test` with zero install,
-// preserving the zero-runtime-dependency story. When the parser changes, change it
-// there and re-sync here (this file is the upstream index.js with only this
-// vendor note inserted after the @ts-check line).
+// Vendored copy of gherkin-node-test@0.11.0 at commit e0d1ec1 (MIT —
+// github.com/bingh0/gherkin-node-test, npm: gherkin-node-test). That package is
+// the canonical source; this copy is kept in-tree so ccr's acceptance suite runs
+// on a bare `node --test` with zero install, preserving the zero-runtime-
+// dependency story. When the parser changes, change it there and re-sync here
+// (this file is the upstream index.js with only this vendor note inserted after
+// the @ts-check line). e0d1ec1 is 0.11.0 plus the annotation fix that makes
+// executeSteps typecheck under the W it declares — folded into the next release.
 //
 // ccr uses the runner half of this file: parseFeature, StepRegistry,
 // executeSteps, runFeature, runFeatures, DataTable, buildSnippet, and
@@ -1501,7 +1503,8 @@ function buildSnippet(text) {
  * derivable from the failure alone. One definition shared by the
  * executeSteps preflight and runFeature's registration-time check, so the
  * two can never drift.
- * @param {Step[]} steps @param {StepRegistry} registry
+ * @template [W=Record<string, any>]
+ * @param {Step[]} steps @param {StepRegistry<W>} registry
  * @returns {Error | null}
  */
 function ambiguityError(steps, registry) {
@@ -1533,16 +1536,19 @@ function ambiguityError(steps, registry) {
  * @param {W} [world]
  * @returns {Promise<W>}
  */
-async function executeSteps(steps, registry, world = {}) {
+async function executeSteps(steps, registry, world = /** @type {W} */ ({})) {
   // Ambiguity preflight, before ANY step runs: a step matching two bindings
   // must fail the scenario without executing it — which binding would have
   // run is silent information, and running "up to the ambiguous step" would
   // leak a partial execution into the world.
   const amb = ambiguityError(steps, registry);
   if (amb) throw amb;
-  /** @type {Array<(w: Record<string, any>) => any>} */
+  /** @type {Array<(w: W) => any>} */
   const deferred = [];
-  world.defer = (/** @type {(w: Record<string, any>) => any} */ fn) => { deferred.push(fn); };
+  // The world a step sees is W plus the defer seam — derived from StepFn's
+  // own first parameter, so this view and the declared contract can't drift.
+  const w = /** @type {Parameters<StepFn<W>>[0]} */ (world);
+  w.defer = (fn) => { deferred.push(fn); };
   // Failure is a FLAG, not a truthy value: `throw undefined` must still fail
   // the scenario — a falsy throw read through truthiness would report a
   // failing step as passing (and, under the @todo inversion, as a false
@@ -1562,14 +1568,14 @@ async function executeSteps(steps, registry, world = {}) {
       // before the body runs — a refused binding must not half-execute.
       const refusal = consumptionError(step, found, args.length);
       if (refusal) throw new Error(refusal);
-      await found.fn(world, ...args);
+      await found.fn(w, ...args);
     }
   } catch (e) {
     failed = true;
     failure = e;
   }
   for (let i = deferred.length - 1; i >= 0; i--) {
-    try { await deferred[i](world); } catch (e) {
+    try { await deferred[i](w); } catch (e) {
       if (!failed) { failed = true; failure = e; }
     }
   }
