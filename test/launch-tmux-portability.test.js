@@ -67,3 +67,30 @@ test('the percentage stays configurable through CCR_SIDEBAR_PCT', () => {
     'the documented default of 34 is still the fallback, not a hardcoded literal',
   );
 });
+
+// --- the remote-session capabilities in sidecar/ccr.tmux.conf ---------------
+// Both lines below were established by measuring the raw bytes reaching a mosh
+// client, and both have a spelling that looks arbitrary and is not.
+
+const CONF = path.join(__dirname, '..', 'sidecar', 'ccr.tmux.conf');
+const conf = () => fs.readFileSync(CONF, 'utf8');
+
+test('true colour is declared, since mosh drops COLORTERM and tmux then downgrades', () => {
+  assert.match(conf(), /set -as terminal-features\s+',xterm-256color:RGB'/,
+    'without this, 24-bit colour silently becomes 256 over mosh');
+});
+
+test('the OSC-52 override names the "c" selection, which is all mosh accepts', () => {
+  const ms = conf().split('\n').find((l) => l.includes('Ms='));
+  assert.ok(ms, 'the clipboard override is present');
+  assert.match(ms, /Ms=\\E\]52;c%p1%\.0s;%p2%s\\007/,
+    'selection spelled "c", p1 consumed by %p1%.0s, BEL as \\007');
+});
+
+test('the override uses \\007 and never \\7', () => {
+  // tmux 3.x SILENTLY discards a terminal-overrides value containing \7 — no
+  // error, and `show -s terminal-overrides` just omits it. Every older guide on
+  // the web uses \7, so this is an easy and invisible regression to reintroduce.
+  const ms = conf().split('\n').find((l) => l.includes('Ms=')) || '';
+  assert.doesNotMatch(ms, /\\7(?!\d)/, 'must not use the \\7 spelling tmux 3.x rejects');
+});

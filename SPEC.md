@@ -107,6 +107,7 @@ mirrors the tmux launcher's `kill-session` sweep.
 | `node` | required | runs ccr + resolves itself for the statusline shim | `process.execPath` (preferred) / `where node` |
 | `claude` | required | pane 0 | `where claude` |
 | `ccs` | optional | `ccr <profile>` | `where ccs` |
+| `tmux` ≥ **3.2** | required for the **sidebar** on Linux/macOS | hosting the two panes | `command -v tmux` + `tmux -V` (`ccr doctor`) |
 | `cmd.exe` / PowerShell | present by default | per-pane env injection + launch glue | n/a |
 
 No tool is bundled. Absence of `wt.exe` triggers the documented fallback, never a

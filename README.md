@@ -70,7 +70,7 @@ On Linux/macOS the default host is `tmux`. No WSL required.
 ## Requirements
 
 - **Node ≥ 18.3** — that's it for the core. **Zero runtime dependencies.**
-- For the optional live `ccr sidecar`: `tmux` on Linux/macOS, or **Windows
+- For the optional live `ccr sidecar`: **`tmux` ≥ 3.2** on Linux/macOS, or **Windows
   Terminal** / **VS Code's integrated terminal** on Windows (no WSL).
 
 ## VS Code (split terminal)
