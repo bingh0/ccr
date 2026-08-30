@@ -53,6 +53,27 @@ const WHOLE_FEATURE_WIP = [
   // fix ships slots and the container layout together, so none of these may be
   // waived individually at release: publishing with any of them unbound ships
   // the bug the release exists to fix.
+  //
+  // The subagent observability views: scoped 2026-08-23 (three files, fence
+  // section "The subagent observability views" in features/OUT-OF-SCOPE.md).
+  // Post-0.5.0 feature work; no release coupling ruled, but same logic as the
+  // git pane applies — agreed criteria are worth holding the build to, and
+  // agreed criteria are not a feature. Entries leave as their steps bind.
+  {
+    feature: 'subagents-view',
+    reason: 'The S2 roster view is unbuilt; steps bind when src/sidecar renders agent blocks from Claude Code transcripts.',
+    ruledOn: '2026-08-23',
+  },
+  {
+    feature: 'subagent-mirror',
+    reason: 'ccr subagents does not exist yet; steps bind with the CLI command and its JSON output.',
+    ruledOn: '2026-08-23',
+  },
+  {
+    feature: 'subagent-channels',
+    reason: 'Fail-open transcript parsing is unbuilt; steps bind with the derivation layer they pin.',
+    ruledOn: '2026-08-23',
+  },
 ];
 
 /**

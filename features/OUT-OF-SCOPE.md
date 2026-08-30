@@ -299,3 +299,82 @@ Anything platform-specific goes to `features/design/`, run by its own
 Candidates already visible: the session-log file shape and its concurrency,
 title-setting mechanics per terminal, statusline width arithmetic, migration's
 rename/copy semantics across filesystems.
+
+---
+
+# The subagent observability views — what they are not
+
+The fence for `subagents-view.feature`, `subagent-mirror.feature` and
+`subagent-channels.feature`, confirmed by the visionary on 2026-08-23 (scope
+4.1.1 interview, aBDD dogfood run). The vision: Claude Code sessions fan work
+out to subagents invisibly; ccr grows a fourth built-in view plus a machine
+door so orchestration can be watched and read without being steered.
+
+## Excluded by decision
+
+| Excluded | Why, in the visionary's terms | Date |
+|---|---|---|
+| Steering or managing subagents in any form (interrupt, kill, nudge) | "most of the time ccr sidecars are view only." Verified before ruling: no per-subagent control path exists upstream (anthropics/claude-agent-sdk-typescript#352, 2026-06-15: even backgrounded tasks cannot be spared an interrupt). Resight condition (added 2026-08-24): this exclusion REOPENS when Claude Code exposes per-subagent control to external tools — a CLI command, hook, or IPC surface; check #352/#275 state before relying on it. The underlying need stays on the ledger at full weight as deliberately absent. Guarded by: "Reading never disturbs the instance", "The doctor surface stays out of channel health". | (2026-08-23) |
+| Any navigation key beyond F3, including arrow/j-k focus tiers | Early combo-key plan (F4-class) was explicitly withdrawn: "keep ourselves simple for MVP - no additional cycle options other than F3". Bare arrows would steal ↑/↓ from Claude's prompt editing under tmux root bindings. | (2026-08-23) |
+| Per-agent staleness timers | An agent going quiet mid-tool-run is normal work pace, not a fault; the stale banner judges the feed, never the pace. Whole-channel silence only. | (2026-08-23) |
+| A doctor channel-health section | Provenance surfaces are the pane stale banner and `ccr subagents --debug` alone; doctor gains nothing. Guarded by: "The doctor surface stays out of channel health". | (2026-08-23) |
+| Masking secret-shaped strings in words | Verbatim ratified with eyes open: masking patterns rot and miss most leaks; same content as expanding in Claude Code itself. | (2026-08-23) |
+| Scrolling, paging or auto-cycling the roster | "scrolling through hundreds of screens is pointless"; nothing auto-advances anywhere (marquee precedent respected; owner: cycling variants were "way too fancy"). | (2026-08-23) |
+| Claude Code Agent View parity | Complementary altitude, not competing: `claude agents` manages detached background sessions and never shows intra-session workers; ccr's view X-rays the workers inside any running session. Recorded so nobody re-litigates "why build this". | (2026-08-23) |
+
+## Deferred to implementation
+
+| Deferred | Note | Date |
+|---|---|---|
+| Retirement policy default (timer vs newer-spawns count) | Owner indifferent ("whatever is cheapest and easiest"). Binding constraint ruled instead: keyed to upstream completion timestamps, never observation time; missing timestamp means no retirement until session end. Scenario numbers are the proposed default, builder-tunable. | (2026-08-23) |
+| Staleness threshold constant | Observable binds (banner appears during sustained whole-channel silence while session lives); 30s is the proposed tunable default. | (2026-08-23) |
+| Worktree-note steering workaround | Owner-named future mechanism if upstream never allows control: drop a note into the other subagent's git worktree for it to pick up. Parked, not MVP. | (2026-08-23) |
+| Comprehensive economy-screen upgrade, post-MVP | Cross-session agent-cost rollup belongs there; `ccr subagents --all` is the interim aggregate door. Owner commitment recorded. | (2026-08-23) |
+
+## Roads not taken
+
+| Contested ruling | Rejected options | Why not |
+|---|---|---|
+| Pane shape | S1 roster + auto-picked detail zone; S3 bare roster; fully-inline-A blocks; H1 rotating detail zone; H2 paging roster; three separate cycling views | Owner on S1: "risky because user [may] experience FOMO"; on S3: "barely tells you more than what claude code tells you now"; on H1/H2: "that's way too fancy". S2 (activity inline under each block) chosen on rendered mockups at 40 columns. |
+| Machine door | Snapshot JSON file in the state dir; both doors | Tribal path knowledge; multi-instance resolution comes free only via the `-i` family. One producer either way — the pane derives from transcripts regardless. |
+| Retirement clock source | Observation time (when ccr first noticed the death) | Needs exactly the persistence the visionary forbade; restarts would resurrect every done block. Upstream timestamps dissolve the contradiction (adversarial objection 2). |
+| Activity line primary signal | Latest tool call over words; words AND tool call always | Words win twice-ratified; tool call demoted to wordless fallback; word-age marker added instead (adversarial objection 3). |
+| Nesting display | Parents only, descendants collapsed | Loses workers from the roster; flat roster with lineage prefix keeps counting honest under bursts. |
+| Burst overflow | Accept blindness beyond slots ("bursts are transient") | Convicted by the visionary's own FOMO standard; overflow line now names live work. |
+
+## Debt this contract deliberately carries
+
+**No `@security` tags yet**, same discipline as the git pane before it:
+`test/security-tags.test.js` refuses an unbound `@security` scenario even
+inside `wip`. The escape-sequence scenario in `subagents-view.feature`
+("Escape sequences inside agent words render inert") earns the tag when its
+steps bind. Recorded here and in the file header so it is debt, not omission.
+
+**Drafted-not-ruled, flagged for the review gate**: the ordering *among*
+finished agents filling leftover slots ("newest finishes") follows from the
+retirement logic but was never put as its own question; likewise the exact
+overflow-line phrasing is presentation below the contract.
+
+**Mixed-era specimen note for the study record**: docs/BDD.md declares ccr a
+deliberately un-retrofitted aBDD-1.0 specimen while scoped corpora keep joining
+it (git pane 2026-08-04, instance layout 2026-08-06, these three 2026-08-23).
+Established pattern; recorded here rather than left discoverable.
+
+## Sanctioned changes
+
+Bound scenarios whose text changes at build, sanctioned here before build
+(direction required):
+
+- `instance-resolution.feature` — the `-i` error-family scenario ("…applies
+  to economy, sidecar and cycle-view"). **Direction: rewords.** The error text
+  gains `subagents` in the command family once `ccr subagents` exists.
+  Sanctioning ruling: the mirror-door election (`ccr subagents [-i] [--all]`,
+  2026-08-23).
+- `sidecar-hotkeys.feature` — "The panel opens on the view it was asked for"
+  outline. **Direction: adds.** Example rows gain the subagent view index once
+  views are enumerated past two. Sanctioning ruling: fourth-position rotation
+  (2026-08-23).
+- `pane-config.feature` / `pane-blobs.feature` — external-pane position
+  indicators, **if** built-in indexing shifts them. **Direction: rewords**
+  (conditional). Sanctioning ruling: same rotation ruling. Flagged possible,
+  not certain, until the build fixes index arithmetic.
