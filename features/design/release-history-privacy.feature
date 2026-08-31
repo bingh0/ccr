@@ -1,4 +1,4 @@
-# Design tier: the contract of src/history-privacy.js — which commits a release
+# Design tier: the contract of scripts/history-privacy.js — which commits a release
 # would newly publish, and which strings in them count as a disclosure. This is
 # release-process machinery, not product behavior: outside the visionary's
 # review contract, see git-index-format.feature's header for the tier's rules.

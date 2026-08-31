@@ -1,6 +1,11 @@
 // @ts-check
 'use strict';
-// src/history-privacy.js — what a release would publish that is not published
+// scripts/history-privacy.js — what a release would publish that is not published
+//
+// Lives in scripts/ deliberately: this is release tooling, and the npm package
+// ships scripts/launch.sh alone — moving here (0.6.0) is what took ~17 kB of
+// release machinery out of every user install. Nothing under src/ or bin/ may
+// require it; it is typechecked by name in jsconfig.json's include list.
 // yet, read out of the object store rather than out of the working tree.
 //
 // Why this is not simply `git grep` over the working tree: a scrubbed tip says
@@ -45,7 +50,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { readObject, parseTree } = require('./git-objects');
+const { readObject, parseTree } = require('../src/git-objects');
 
 /** Commits walked before the scan gives up rather than grind. */
 const MAX_COMMITS = 2000;

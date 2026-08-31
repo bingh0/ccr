@@ -26,7 +26,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { scanHistory, unpublishedCommits, loadPrivatePatterns } = require('../src/history-privacy');
+const { scanHistory, unpublishedCommits, loadPrivatePatterns } = require('../scripts/history-privacy');
 
 const HAVE_GIT = spawnSync('git', ['--version'], { encoding: 'utf8' }).status === 0;
 
@@ -222,7 +222,7 @@ test('an unparseable private pattern is reported, not silently dropped', (t) => 
 
 test('every fixture-register entry is still needed, and still fake', () => {
   const { FIXTURE_LITERALS } = require('./privacy-fixtures');
-  const { DETECTORS } = require('../src/history-privacy');
+  const { DETECTORS } = require('../scripts/history-privacy');
   const root = path.join(__dirname, '..');
 
   for (const f of FIXTURE_LITERALS) {

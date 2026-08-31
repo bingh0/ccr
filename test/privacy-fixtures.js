@@ -3,7 +3,7 @@
 // test/privacy-fixtures.js — invented strings that LOOK private, and the
 // reason each one is not.
 //
-// The history privacy scan (src/history-privacy.js) judges a detector hit
+// The history privacy scan (scripts/history-privacy.js) judges a detector hit
 // against what the published tree already contains, so it needs no allowlist
 // for anything real: an address already on npm is silent because it is already
 // out there. Test fixtures are the one exception, and they are unavoidable —

@@ -16,5 +16,5 @@
     "noFallthroughCasesInSwitch": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["bin/**/*.js", "src/**/*.js", "test/**/*.js"]
+  "include": ["bin/**/*.js", "src/**/*.js", "test/**/*.js", "scripts/history-privacy.js"]
 }

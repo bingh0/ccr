@@ -14,7 +14,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { scanHistory } = require('../../src/history-privacy');
+const { scanHistory } = require('../../scripts/history-privacy');
 const { writeLoose, writeTrees, writeCommit } = require('../steps/_git-fixture');
 
 /** @param {import('../gherkin').StepRegistry} reg */

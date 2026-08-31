@@ -3,7 +3,7 @@
 'use strict';
 // scripts/scan-package.js — scan what npm would actually SHIP.
 //
-// The history scan (src/history-privacy.js) answers "which commits would this
+// The history scan (scripts/history-privacy.js) answers "which commits would this
 // release newly publish". It does not answer "what is in the tarball", and the
 // two are different sets of bytes: `files` in package.json decides the second,
 // and a file can enter the package without any commit looking new. Nothing had
@@ -20,7 +20,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { DETECTORS, loadPrivatePatterns, baselineLiterals } = require('../src/history-privacy');
+const { DETECTORS, loadPrivatePatterns, baselineLiterals } = require('./history-privacy');
 const { discoverRepo } = require('../src/git-repo');
 const { resolveRef, readObject } = require('../src/git-objects');
 

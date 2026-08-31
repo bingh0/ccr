@@ -42,14 +42,14 @@
 // that someone chose to. This check looks every time, so publishing a flat
 // scrubbed tip is a rule the release obeys rather than a habit it relies on.
 //
-// See src/history-privacy.js for what counts as a disclosure and why the
+// See scripts/history-privacy.js for what counts as a disclosure and why the
 // specifics live outside this repository.
 
 const { WHOLE_FEATURE_WIP } = require('../test/wip-register');
 const { fixtureLiterals } = require('../test/privacy-fixtures');
 const { discoverRepo } = require('../src/git-repo');
 const { resolveHead, resolveRef } = require('../src/git-objects');
-const { scanHistory, loadPrivatePatterns } = require('../src/history-privacy');
+const { scanHistory, loadPrivatePatterns } = require('./history-privacy');
 
 const ENV_KEY = 'CCR_RELEASE_ACCEPTS_UNBOUND';
 const HISTORY_ENV_KEY = 'CCR_RELEASE_ACCEPTS_PRIVATE_HISTORY';
