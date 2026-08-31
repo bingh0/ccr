@@ -39,6 +39,11 @@ const { lintStepDefinitionSource } = require('./gherkin');
 
 const ROOT = path.join(__dirname, '..');
 
+// Repo-relative with forward slashes on every platform — the control below
+// compares against 'test/steps/...' literals, and Windows' path.relative
+// yields backslashes (the same trap test/sidecar-capabilities.test.js names).
+const rel = (/** @type {string} */ f) => path.relative(ROOT, f).split(path.sep).join('/');
+
 /** Every .js under a directory, recursively. */
 function walk(/** @type {string} */ dir, /** @type {string[]} */ out = []) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -69,9 +74,9 @@ test('every step-layer absence assertion is earned or sanctioned', () => {
   /** @type {string[]} */
   const findings = [];
   for (const file of scanned) {
-    const rel = path.relative(ROOT, file);
-    for (const f of lintStepDefinitionSource(fs.readFileSync(file, 'utf8'), rel)) {
-      findings.push(`${rel}:${f.line} [${f.rule}] ${f.message}`);
+    const name = rel(file);
+    for (const f of lintStepDefinitionSource(fs.readFileSync(file, 'utf8'), name)) {
+      findings.push(`${name}:${f.line} [${f.rule}] ${f.message}`);
     }
   }
   assert.deepStrictEqual(findings, [],
@@ -86,7 +91,7 @@ test('every step-layer absence assertion is earned or sanctioned', () => {
 // the loop above would scan nothing and report clean.
 test('the step-lint scan actually reaches the step layer', () => {
   assert.ok(scanned.length >= 40, `scanned only ${scanned.length} files — the roots are wrong`);
-  const names = scanned.map((f) => path.relative(ROOT, f));
+  const names = scanned.map(rel);
   for (const expected of [
     'test/steps/pane-blobs.steps.js',
     'test/steps/_absence.js',
