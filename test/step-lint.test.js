@@ -22,7 +22,10 @@
 // shared helpers those import — not merely the *.steps.js files.
 //
 // Deliberately NOT scanned yet: the sibling *.test.js unit tests, which carry
-// 28 findings of the same class as of 2026-08-31. That is a real backlog, named
+// 31 findings of the same class as of 2026-08-31 (three arrived with the
+// mosh/tmux PR's own tests, one of them the optional-lookup shape — mitigated
+// by the positive at launch-tmux-portability.test.js's Ms= extraction, which
+// throws if the line goes missing). That is a real backlog, named
 // here so it is not mistaken for clean. The one that mattered immediately was
 // sidecar-capabilities.test.js, because pane-blobs.feature's steps delegate
 // their global capability guarantee to it; it is sanctioned against its own
