@@ -693,8 +693,10 @@ module.exports = function definePaneBlobsSteps(reg) {
     assert.ok(stmt, 'the F2 binding statement is emitted');
     assert.match(stmt[0], /send-keys -t %s '\/clear' Enter/, 'the target is a captured id, not a literal');
     assert.match(stmt[0], /"\$CLAUDE_PANE"/, 'the id filled in is the CLAUDE pane, not any other pane');
-    // step-lint: allow unearned-absence -- the line above asserts /"\$CLAUDE_PANE"/ positively on this same statement, proving a "$..._PANE" reference is found here when present
-    assert.ok(!/"\$SIDEBAR_PANE"/.test(stmt[0]), 'never the sidecar\'s own pane');
+    // The launcher really does reference "$SIDEBAR_PANE" — at the pane-mode hook,
+    // well away from this binding — so the whole file witnesses the needle while
+    // the F2 statement is the subject that must not contain it.
+    refuteWithControl(/"\$SIDEBAR_PANE"/, stmt[0], w.launchSh, 'never the sidecar\'s own pane');
     // step-lint: allow unearned-absence -- the send-keys assertion two lines up matches /send-keys -t %s/ positively in this same launcher, so the prefix is proven; only the relative-index tail is denied
     assert.ok(!/send-keys -t \.\d/.test(w.launchSh), 'never a relative pane index, which retargets after a split');
   });

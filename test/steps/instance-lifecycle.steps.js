@@ -180,7 +180,11 @@ module.exports = function defineInstanceLifecycleSteps(reg) {
   reg.define(/^instance "b" on slot 2 on the same account has burned the 5h window to 30%$/, (w) => {
     const dir = instDir(w, 2);
     makeLive(dir);
-    put(dir, 'last-status.json', status({ ctxPct: 90, cost: 9.0, five: 30 }));
+    // b's cost is the value a's panel must never show. Held on the world so the
+    // Then derives its needle from it instead of repeating the number — the two
+    // used to be able to drift apart silently, which made the refusal vacuous.
+    w.bCost = 9.0;
+    put(dir, 'last-status.json', status({ ctxPct: 90, cost: w.bCost, five: 30 }));
   });
 
   reg.define(/^a user settings file with known contents$/, (w) => {
@@ -263,8 +267,12 @@ module.exports = function defineInstanceLifecycleSteps(reg) {
   reg.define(/^a's sidebar shows context at 40% and cost \$1\.00$/, (w) => {
     assert.match(w.frame, /40%/, 'a\'s own context, not b\'s');
     assert.match(w.frame, /\$1\.00/, 'a\'s own cost, not b\'s');
-    // step-lint: allow unearned-absence -- the line above asserts /\$1\.00/ POSITIVELY on this same frame, proving a dollar figure in exactly this format renders here; only the digits differ
-    assert.doesNotMatch(w.frame, /\$9\.00/, 'b\'s cost must not leak into a\'s panel');
+    // No literal needle to go stale: this is b's own fixture value, rendered the
+    // way the panel renders costs. A control would be circular — a needle built
+    // from the fixture matches the fixture by construction — so the honest fix
+    // is to remove the drift, not to stage a proof.
+    const bCost = `$${w.bCost.toFixed(2)}`;
+    assert.ok(!w.frame.includes(bCost), `b's cost ${bCost} must not leak into a's panel`);
   });
 
   reg.define(/^a's 5h meter reads 30%$/, (w) => {

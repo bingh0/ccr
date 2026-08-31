@@ -32,6 +32,27 @@
 // branch. A composite witness is the normal answer: concatenate the sources
 // that really contain each token.
 //
+// WHEN A CONTROL IS WORTH ITS LINE. A control guards ONE failure mode: the
+// needle going stale while the refusal stays green. That mode has to be
+// possible for the guard to mean anything, and it is not always possible:
+//
+//   - Load-bearing. The needle names something that can be renamed — a module
+//     (`child_process`), a source token (`process.stdin`), ccr's own vocabulary
+//     (`%/min`, `ROI`, `5h`), a fixture value, a render format. Drift here is
+//     real and silent, and the control is the only thing that would notice.
+//   - Ceremony. The needle is structurally immutable: an ANSI CSI introducer,
+//     an OSC sequence, a brace, a product name. Nothing can rename `\x1b[`.
+//     A control over one of these asserts that a string written to contain it
+//     contains it — always true, proving nothing. Prefer a sanction saying so.
+//   - Not applicable. The needle is DERIVED from the world the subject came
+//     from (`w.bCost`, a captured fixture). It cannot diverge from what it
+//     denies, and a control would be circular. The lint exempts these already:
+//     an identifier needle is a value the suite produced.
+//
+// The remedy is meant to match the risk. Applying controls uniformly reads as
+// rigour and is really just noise, and noise is how a reviewer stops being
+// able to tell which of these lines is holding something up.
+//
 // Choose witnesses as evidence, not decoration: the real module that does the
 // thing, the real fixture field whose value must not reach the frame. A witness
 // written to match by construction proves only that the regex compiles. Some

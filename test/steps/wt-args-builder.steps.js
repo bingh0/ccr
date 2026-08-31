@@ -89,10 +89,8 @@ module.exports = function defineWtArgsBuilderSteps(reg) {
     assert.ok(panes(w.args).pane0.includes(`"${w.settingsFile}"`));
   });
   reg.define(/^no raw JSON object appears on the command line$/, (w) => {
-    // Witness: a real settings object, which is exactly what must not appear
-    // inline on the command line instead of being referenced by path.
-    refuteWithControl('{', w.args.join(' '), JSON.stringify({ statusLine: { type: 'command' } }),
-      'the settings object is passed by path, never inline');
+    // step-lint: allow unearned-absence -- the needle is a single structural character. Every JSON object contains it, and no rename upstream or typo here can make "{" stop being the brace, so there is no stale-needle failure mode for a control to guard against. A control here would assert that a JSON string contains a brace: always true, proving nothing
+    assert.ok(!w.args.join(' ').includes('{'), 'the settings object is passed by path, never inline');
   });
 
   // findWindowsTerminal

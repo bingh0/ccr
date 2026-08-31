@@ -140,11 +140,11 @@ module.exports = function defineEconomySteps(reg) {
   reg.define(/^the "([^"]+)" line is labelled as used, not left$/, (w, meter) => {
     const row = meterRow(w, String(meter));
     assert.match(row, /\d+% used/, `${meter} shows "% used"`);
-    // step-lint: allow unearned-absence -- the line above asserts /\d+% used/ positively on this same row: same shape, one word apart
+    // step-lint: allow unearned-absence -- "left" is this scenario's own forbidden word, not a name anything upstream can rename, so the needle cannot drift out from under the refusal; the /\d+% used/ assertion on the line above rules out the other way this could go vacuous, an empty row. NOT claimed: that "used" proves "left" — it does not
     assert.ok(!/\d+% left/.test(row), `${meter} must not show "% left"`);
   });
   reg.define(/^any time figure labelled "left" or "until" refers to remaining budget$/, (w) => {
-    // step-lint: allow unearned-absence -- the used-vs-left step above asserts /\d+% used/ positively on a row of this same output
+    // step-lint: allow unearned-absence -- same reasoning as the used-vs-left step: "left" is the spec's own forbidden word with nothing upstream to rename it, and that step's positive /\d+% used/ proves this output renders percentage labels at all
     assert.ok(!/% left/.test(w.out), 'no percentage is labelled "left"');
   });
 
