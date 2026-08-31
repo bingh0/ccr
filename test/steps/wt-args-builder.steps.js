@@ -6,7 +6,6 @@
 // exit sentinel is wired); the exact-token pinning lives in launch-win.test.js.
 
 const assert = require('node:assert');
-const { refuteWithControl } = require('./_absence');
 const { launchWin, panes } = require('./_win-helpers');
 
 const DEFAULTS = {

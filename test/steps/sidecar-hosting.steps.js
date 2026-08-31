@@ -281,7 +281,7 @@ module.exports = function defineSidecarHostingSteps(reg) {
     // with EMPTY stderr — no diagnosis, nothing to act on.
     assert.strictEqual(w.launch.status, 1, "the launcher's own guard exits 1, not the shell's 2");
     // Positive direction: stderr must CARRY something, which is the fact the
-  // regression destroyed. Asserting "not empty string" says the same thing in
+    // regression destroyed. Asserting "not empty string" says the same thing in
     // the shape that goes green when the needle is wrong.
     assert.ok(String(w.launch.stderr || '').trim().length > 0, 'never a silent abort');
   });

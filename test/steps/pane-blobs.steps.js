@@ -734,11 +734,18 @@ module.exports = function definePaneBlobsSteps(reg) {
   });
   reg.define(/^no approximate target is substituted for the captured pane id$/, (w) => {
     const conf = fs.readFileSync(path.join(ROOT, 'sidecar', 'ccr.tmux.conf'), 'utf8');
+    // tmux accepts `bind` as an abbreviation of `bind-key`, so the needle
+    // covers both spellings — a hand-added `bind -n F2` must not slip past.
     // step-lint: allow unearned-absence -- the launcher's own F2 statement is matched positively by the typed-into-Claude step via /bind-key -n F2 confirm-before/, so this needle is proven to find a real binding when one exists
-    assert.ok(!/bind-key -n F2/.test(conf), 'the shipped conf binds no approximate F2');
+    assert.ok(!/bind(-key)?\s+-n\s+F2/.test(conf), 'the shipped conf binds no approximate F2');
+    // The refusal's subject is the guard block itself, so the block must be
+    // FOUND before its emptiness means anything — an extraction that silently
+    // came back null would make this refusal vacuously green.
+    const guardBlock = /if \[ -n "\$CLAUDE_PANE" \][\s\S]*?fi/.exec(w.launchSh);
+    assert.ok(guardBlock, 'the CLAUDE_PANE guard block is present in the launcher');
     // Witness: the whole launcher, whose one `else` lives in an unrelated
     // branch — so /else/ is proven able to find a shell alternative here.
-    refuteWithControl(/else/, /if \[ -n "\$CLAUDE_PANE" \][\s\S]*?fi/.exec(w.launchSh)?.[0] || '',
+    refuteWithControl(/else/, guardBlock[0],
       w.launchSh, 'no fallback branch binds an approximate target');
   });
 

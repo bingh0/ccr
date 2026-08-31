@@ -22,7 +22,7 @@
 // shared helpers those import — not merely the *.steps.js files.
 //
 // Deliberately NOT scanned yet: the sibling *.test.js unit tests, which carry
-// 29 findings of the same class as of 2026-08-30. That is a real backlog, named
+// 28 findings of the same class as of 2026-08-31. That is a real backlog, named
 // here so it is not mistaken for clean. The one that mattered immediately was
 // sidecar-capabilities.test.js, because pane-blobs.feature's steps delegate
 // their global capability guarantee to it; it is sanctioned against its own
@@ -52,6 +52,9 @@ const ALSO = [
   'test/privacy-fixtures.js',
   'test/wip-register.js',
   'test/sidecar-capabilities.test.js',
+  // The anchor set for _absence.js itself: the file certifying the refusal
+  // helper faces the same linter as the refusals it certifies.
+  'test/absence.test.js',
 ];
 
 const scanned = [
