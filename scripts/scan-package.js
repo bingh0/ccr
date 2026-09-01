@@ -27,14 +27,33 @@ const { resolveRef, readObject } = require('../src/git-objects');
 const DEFAULT_PUBLIC_REF = 'refs/remotes/origin/main';
 const ROOT = path.join(__dirname, '..');
 
+// npm has shipped THREE shapes for `npm pack --json`: a bare entry object, a
+// one-element array of entries, and — since npm 12 — an object KEYED BY
+// PACKAGE NAME. Reaching for `.files` on the wrong one yields undefined, and
+// the scan below then walks an empty list and prints "clean". That is exactly
+// what happened: on npm 12 this scan examined ZERO files while reporting the
+// tarball clean, through the 0.6.0 publish. So unwrap all three shapes by
+// looking for the entry that actually carries a files array.
+/** @param {any} parsed @returns {any} the entry carrying `files`, or null */
+function packEntry(parsed) {
+  if (!parsed || typeof parsed !== 'object') return null;
+  const candidates = Array.isArray(parsed) ? parsed : [parsed, ...Object.values(parsed)];
+  return candidates.find((c) => c && Array.isArray(c.files)) || null;
+}
+
 /** The files npm would pack, asked of npm. */
 function packedFiles() {
   const r = spawnSync('npm', ['pack', '--dry-run', '--json'], { cwd: ROOT, encoding: 'utf8' });
   if (r.status !== 0) return { ok: false, files: [], why: (r.stderr || '').trim() || `npm pack exited ${r.status}` };
   try {
-    const parsed = JSON.parse(r.stdout);
-    const entry = Array.isArray(parsed) ? parsed[0] : parsed;
-    return { ok: true, files: (entry.files || []).map((/** @type {any} */ f) => f.path), why: '' };
+    const entry = packEntry(JSON.parse(r.stdout));
+    const files = entry ? entry.files.map((/** @type {any} */ f) => f.path) : [];
+    // A package always packs something. An empty list means the shape was not
+    // understood, and a scan that read nothing must REFUSE, never report clean.
+    if (files.length === 0) {
+      return { ok: false, files: [], why: 'npm pack --json named no files — unrecognised output shape' };
+    }
+    return { ok: true, files, why: '' };
   } catch (e) {
     return { ok: false, files: [], why: e instanceof Error ? e.message : String(e) };
   }
@@ -114,4 +133,4 @@ function main() {
 
 if (require.main === module) process.exit(main());
 
-module.exports = { packedFiles };
+module.exports = { packedFiles, packEntry };
