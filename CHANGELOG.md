@@ -7,6 +7,46 @@ version is worth upgrading to, and where to read the rest.
 
 Dates are npm publish dates, because that is when a version reached anyone.
 
+## 0.6.0 — 2026-09-01
+
+The remote-session release. Over mosh, two things had been degrading in
+silence — every clipboard copy was dropped in transit, and 24-bit colour was
+quietly flattened to 256 — and the tmux version floor the sidecar had grown
+was written down nowhere. All three were measured at the terminal, reading
+the raw bytes that reach a mosh client, not inferred.
+
+- **The clipboard survives mosh.** tmux's built-in OSC 52 emits an empty
+  selection field and mosh's parser accepts only an explicit `c`, so every
+  copy vanished between the two. The shipped tmux config now spells the
+  selection out — and names `c` explicitly, which is *more* compatible than
+  tmux's default everywhere, not a mosh-only workaround.
+- **True colour survives mosh.** mosh forces `TERM=xterm-256color` and drops
+  `COLORTERM`, which tmux reads as "no RGB" and silently downgrades every
+  24-bit colour to the nearest 256. The config now declares RGB for that
+  TERM, restoring what mosh was carrying fine all along.
+- **The tmux floor is declared: 3.2.** Percentage splits and
+  `terminal-features` need 3.1; the pane-scoped hooks that keep the sidebar
+  out of copy-mode need 3.2. Below the floor each failure is silent and looks
+  like something else, so `ccr doctor` now reports the tmux version and names
+  one that is too old — and an unreadable version is reported as unreadable,
+  never manufactured into a failure.
+- **The sidebar split speaks tmux 3.4's dialect.** `-p 34` was deprecated in
+  3.1 and rejected outright in 3.4; the launcher sizes with `-l 34%`, which
+  every supported tmux accepts.
+- **The Node floor rises to 22.17.** Node 18 and 20 are past their end of
+  life, and the vendored test runner's own floor is 22.17 — testing below it
+  produced a lane that hung rather than failed. `engines`, the CI matrix,
+  `ccr doctor`'s check, and the spec all state the same floor now, and the
+  matrix pins 22.17 exactly so the floor is tested, not just declared.
+- **The acceptance suite hardened underneath.** The vendored Gherkin runner
+  moved to gherkin-node-test 0.11.0, whose step linter enforces a rule the
+  suite now lives by: a negative assertion over a literal needle passes
+  forever once the needle rots, so *absence must be earned* — by a control
+  proving the needle can still find, or a sanction naming what proves it.
+  Every structural refusal in the step layer (the renderer spawns nothing,
+  the launcher reads no blob, the sidecar has no input channel) now carries
+  one or the other, and both of 0.11's linters gate the suite.
+
 ## 0.5.0 — 2026-08-22
 
 The Windows release. The things that could not be reasoned about were measured
