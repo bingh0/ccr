@@ -84,3 +84,30 @@ the same records.
   elective E1 and retires the 0.9.0-vs-0.10.0 split this section described;
   the two new registration guards are recorded as obligations on the build.
   Sanctioned by the owner's ruling to complete the 0.11 port ahead of 0.6.
+- 2026-09-01 — the stale marker appears only when the roster holds at least one
+  LIVE agent. R22 defines staleness as whole-transcript silence while the
+  session lives, and left open what it means over a roster that has finished:
+  a fault marker on work that is simply done reports a fault that is not there.
+  The clock itself is unchanged — the newest upstream timestamp across every
+  channel. Sanctioned by R22 (staleness threshold and its presentation ruled
+  builder-tunable, the observable binding) with the fence's deferral of the
+  threshold constant.
+- 2026-09-01 — the per-agent token figure is
+  `input + output + cache_creation`, summed once per assistant MESSAGE rather
+  than once per transcript record. Cache reads are excluded as the
+  non-meter-draining component, following `DRAIN_WEIGHTS`' precedent in
+  src/transcripts.js; the per-message deduplication answers a fact of the
+  format rather than a preference — Claude Code splits one message across
+  several records, each repeating the same `usage`, so a per-record sum
+  inflates a three-block turn threefold (verified on 2.1.252). Sanctioned by
+  N4 read together with the shape section's "the builder's call" on placement
+  and mechanism; documented in docs/SUBAGENTS.md.
+- 2026-09-01 — ONE derivation path: the CLI's full parse is the pane's
+  incremental tick run to exhaustion over the same accumulator, not a second
+  implementation. The shape section left the module's placement and internals
+  to the builder and required only that both consumers render from one model;
+  parity by construction is the cheapest way to keep the mirror's parity
+  scenarios honest, since two implementations that agree today are exactly what
+  those scenarios would stop catching. Sanctioned by the shape section's
+  derivation-layer ruling ("both consumers render from it; parity scenarios in
+  subagent-mirror.feature hold them together").

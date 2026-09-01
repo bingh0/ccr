@@ -69,11 +69,11 @@ const WHOLE_FEATURE_WIP = [
     reason: 'ccr subagents does not exist yet; steps bind with the CLI command and its JSON output.',
     ruledOn: '2026-08-23',
   },
-  {
-    feature: 'subagent-channels',
-    reason: 'Fail-open transcript parsing is unbuilt; steps bind with the derivation layer they pin.',
-    ruledOn: '2026-08-23',
-  },
+  // 'subagent-channels' left the register on 2026-09-01, with the derivation
+  // layer it pinned: src/subagents.js reads Claude Code's own records and
+  // every scenario binds against a real projects tree — including the doctor
+  // scenario, which runs the real doctor before and after the channels exist
+  // and holds it to the same output.
 ];
 
 /**
