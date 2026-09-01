@@ -43,8 +43,25 @@ function packEntry(parsed) {
 
 /** The files npm would pack, asked of npm. */
 function packedFiles() {
-  const r = spawnSync('npm', ['pack', '--dry-run', '--json'], { cwd: ROOT, encoding: 'utf8' });
-  if (r.status !== 0) return { ok: false, files: [], why: (r.stderr || '').trim() || `npm pack exited ${r.status}` };
+  // npm on Windows is npm.cmd, and Node refuses to execute a .cmd without a
+  // shell — spawnSync returns status null and the scan cannot say which files
+  // ship. These three arguments are fixed literals with no metacharacters, so
+  // the cmd quote-break risk src/launch-vscode.js guards against cannot arise
+  // here. Reported as `exited null` before, which named nothing: an error the
+  // scan cannot explain is the one it most needs to.
+  // The two-branch shape src/launch-vscode.js uses: a command STRING under the
+  // shell, an args array without it. Passing an args array alongside
+  // shell:true is deprecated (DEP0190) precisely because the arguments are
+  // concatenated rather than escaped.
+  const r = process.platform === 'win32'
+    ? spawnSync('npm pack --dry-run --json', { cwd: ROOT, encoding: 'utf8', shell: true })
+    : spawnSync('npm', ['pack', '--dry-run', '--json'], { cwd: ROOT, encoding: 'utf8' });
+  if (r.status !== 0) {
+    const why = (r.error && r.error.message)
+      || (r.stderr || '').trim()
+      || `npm pack exited ${r.status} (the process did not run)`;
+    return { ok: false, files: [], why };
+  }
   try {
     const entry = packEntry(JSON.parse(r.stdout));
     const files = entry ? entry.files.map((/** @type {any} */ f) => f.path) : [];

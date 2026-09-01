@@ -36,7 +36,10 @@ because every one of them read the config file rather than asking tmux.
   nothing, and it did so through the 0.6.0 publish. It now understands every
   shape npm has shipped, and an unrecognised one REFUSES rather than passing:
   a guard whose input can silently go empty is not a guard. Run over the real
-  48 files, the tarball is clean.
+  48 files, the tarball is clean. The probe also never ran on Windows at all —
+  `npm` is `npm.cmd` there and Node will not execute it without a shell — so
+  it is portable now, and says what actually went wrong instead of `exited
+  null`.
 
 Who was affected: the override keys on `xterm-256color`, which is the TERM mosh
 forces, so remote sessions lost every copy. A session whose client reports its
