@@ -53,9 +53,39 @@ function tmuxVersion(bin) {
   } catch { return null; }
 }
 
+// The clipboard override is a string tmux itself parses, and a quoting mistake
+// there is INVISIBLE in the source. 0.6.0 shipped the value in DOUBLE quotes;
+// tmux's parser consumed the backslash of the unknown escape `\E`, stored a
+// literal `E]52;...`, and emitted that as plain text — the copy landed in the
+// tmux buffer, the "copied N chars" message appeared, and no clipboard was ever
+// set. The config file still READ correctly, which is why every source-text
+// test stayed green while the shipped feature was inert. Only tmux can settle
+// it, so ask tmux: parse the shipped config in a throwaway server and read back
+// what it actually stored.
+/**
+ * @param {string} bin @param {string} conf
+ * @returns {string|null} resolved `terminal-overrides`, or null if unreadable
+ */
+function tmuxOverrides(bin, conf) {
+  // -S (an explicit socket path), never -L: a -L name lands in the same
+  // directory as the real ccr-<profile> servers, and this server is disposable.
+  const sock = path.join(os.tmpdir(), `ccr-doctor-${process.pid}-${Date.now()}.sock`);
+  try {
+    if (!fs.existsSync(conf)) return null;
+    const r = spawnSync(bin, ['-S', sock, '-f', conf,
+      'start-server', ';', 'show', '-s', 'terminal-overrides', ';', 'kill-server'],
+      { encoding: 'utf8', timeout: 5000 });
+    return r.status === 0 ? (r.stdout || '') : null;
+  } catch { return null; } finally {
+    // kill-server ends the process but leaves the socket inode behind.
+    try { fs.rmSync(sock, { force: true }); } catch { /* ignore */ }
+  }
+}
+
 /**
  * @param {{ platform?: string, has?: (cmd: string) => (string|null),
  *   tmuxVersion?: (bin: string) => ({major:number,minor:number}|null),
+ *   tmuxOverrides?: (bin: string, conf: string) => (string|null),
  *   homedir?: string, repo?: string, write?: (s: string) => void,
  *   env?: Record<string, string|undefined> }} [opts]
  *   side effects are injectable for testing; defaults hit the real environment
@@ -65,6 +95,7 @@ function run(opts = {}) {
   const platform = opts.platform || process.platform;
   const hasFn = opts.has || has;
   const tmuxVerFn = opts.tmuxVersion || tmuxVersion;
+  const tmuxOverridesFn = opts.tmuxOverrides || tmuxOverrides;
   const homedir = opts.homedir || os.homedir();
   const REPO = opts.repo || path.join(__dirname, '..');
   const write = opts.write || ((s) => { process.stdout.write(s); });
@@ -110,6 +141,23 @@ function run(opts = {}) {
         problems++;
       } else {
         out.push(ok(`tmux ${v.major}.${v.minor} (${stripControl(tmux)})`));
+      }
+
+      // Does the shipped clipboard override survive tmux's own config parser?
+      // See tmuxOverrides above: the source text cannot answer this, and in
+      // 0.6.0 it answered wrongly for a whole release. `show` prints the stored
+      // backslash escaped, so a surviving `\E` reads back as `\\E`.
+      const overrides = tmuxOverridesFn(tmux, path.join(REPO, 'sidecar', 'ccr.tmux.conf'));
+      if (overrides === null) {
+        // An unreadable probe is not evidence of a problem — the same rule the
+        // unreadable version above follows.
+        out.push(dim('· clipboard override unverified (tmux would not report it)'));
+      } else if (/Ms=\\\\E\]52;c/.test(overrides)) {
+        out.push(ok('clipboard override survives tmux config parsing (OSC 52 reaches the client)'));
+      } else {
+        out.push(bad('tmux dropped the clipboard override\'s \\E — copies will not reach your '
+          + 'clipboard over mosh/ssh. sidecar/ccr.tmux.conf must SINGLE-quote the Ms value'));
+        problems++;
       }
     }
     out.push(hasFn('bash') ? ok('bash') : warn('bash missing — needed for the launcher'));
