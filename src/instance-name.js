@@ -179,4 +179,25 @@ function prepareInstance(slot, o = {}) {
   return { name, title: composeTitle(o.profile, name) };
 }
 
-module.exports = { NAME_RE, NAME_FILE, mapName, deriveName, liveNames, withSuffix, recordName, locationFrom, composeTitle, prepareInstance };
+/**
+ * The title for an EXPLICITLY namespaced launch — CCR_SESSION or
+ * CCR_STATE_DIR preset, so allocateSlot returned null and prepareInstance
+ * never ran. The slot is rightly skipped (the explicit choice outranks the
+ * automatic one) but the title never depended on it: only the collision
+ * SUFFIX did, and that pass disambiguates within the slot roster, which an
+ * explicit namespace sits outside of. Same composition rule, minus the
+ * suffix: the explicit --name if given, else the repo-derived autoname.
+ * 'ccr' is the floor when nothing legal survives the allow-list
+ * (locationFrom → null) — a launch someone namespaced by hand must still
+ * get an address, and a title that can silently go empty is how this whole
+ * path shipped dark in the first place.
+ *
+ * @param {{ profile?: string, name?: string|null, cwd?: string }} [o]
+ * @returns {string}
+ */
+function explicitTitle(o = {}) {
+  const name = o.name != null ? o.name : (locationFrom(o.cwd || process.cwd()) || 'ccr');
+  return composeTitle(o.profile, name);
+}
+
+module.exports = { NAME_RE, NAME_FILE, mapName, deriveName, liveNames, withSuffix, recordName, locationFrom, composeTitle, prepareInstance, explicitTitle };

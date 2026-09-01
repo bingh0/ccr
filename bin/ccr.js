@@ -417,7 +417,11 @@ function cmdLaunch(profile, name) {
     ? naming.prepareInstance(slot, { profile, name }) : null;
   let env = slots.applySlotEnv(process.env, slot);
   // The tab's ADDRESS, composed once here and never retitled mid-session.
-  if (inst) env = { ...env, CCR_TITLE: inst.title };
+  // A null slot means CCR_SESSION/CCR_STATE_DIR were preset — the slot is
+  // rightly skipped, but the title must not be: leaving it unset left every
+  // explicitly-namespaced launch untitled (set-titles stayed off), so the
+  // terminal kept whatever the shell last wrote.
+  env = { ...env, CCR_TITLE: inst ? inst.title : naming.explicitTitle({ profile, name }) };
   // This call blocks for the session's whole lifetime (launch.sh ends in `tmux
   // attach`), which is exactly why this process is what owns the slot.
   const r = spawnSync('bash', profile ? [launcher, profile] : [launcher], { stdio: 'inherit', env });

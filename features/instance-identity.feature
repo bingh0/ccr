@@ -41,6 +41,17 @@ Feature: Showing which instance you're in
     When the terminal title is composed
     Then the terminal title is "cc1 / a-is-awesome"
 
+  Scenario: An explicitly namespaced launch still gets a title
+    # CCR_SESSION / CCR_STATE_DIR skip slot allocation — the explicit choice
+    # outranks the automatic one — but only the collision suffix ever needed
+    # the slot. The failing world: every launch through a wrapper that
+    # namespaces its sessions (the documented env overrides) silently shipped
+    # with no title at all, and the terminal kept whatever the shell last
+    # wrote — misread as "titles don't work over mosh".
+    Given a bare ccr launched from repository "a" with CCR_SESSION and CCR_STATE_DIR preset
+    When the terminal title is composed
+    Then the terminal title is "a"
+
   Scenario: The title is never retitled mid-session
     # The title is an address, and the pane is the surface that is honest
     # about movement. The failing world: a title that follows the session,

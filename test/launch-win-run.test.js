@@ -63,6 +63,7 @@ function makeDeps(o = {}) {
     // instances container — EVERY launch slots now, profiled or bare;
     // features/instance-slots.feature owns the allocation behaviour itself.
     prepareInstance: o.prepareInstance || (() => ({ name: 'stub', title: 'stub' })),
+    explicitTitle: o.explicitTitle || (() => 'stub-explicit'),
     allocateSlot: o.allocateSlot || (() => ({
       slot: 1, session: 'ccr',
       stateDir: path.join(o.home || '/home/me', '.ccr', 'instances', '1'),
@@ -142,6 +143,22 @@ test('run: the instance title reaches the Windows Terminal tab', () => {
   run('c1', deps, { name: null });
   const { args } = calls.spawnWt[0];
   assert.strictEqual(args[args.indexOf('--title') + 1], 'c1 / a');
+});
+
+test('run: an explicitly namespaced launch still titles its tab', () => {
+  // The tmux path's untitled-launch bug had an exact twin here: a preset
+  // CCR_SESSION / CCR_STATE_DIR skips the slot, prepareInstance never runs,
+  // and the tab fell back to 'Claude'. The address exists without a slot.
+  /** @type {any[]} */
+  const asked = [];
+  const { deps, calls } = makeDeps({
+    allocateSlot: () => null,
+    explicitTitle: (/** @type {any} */ o) => { asked.push(o); return 'c1 / a'; },
+  });
+  run('c1', deps, { name: null });
+  const { args } = calls.spawnWt[0];
+  assert.strictEqual(args[args.indexOf('--title') + 1], 'c1 / a');
+  assert.strictEqual(asked[0].profile, 'c1', 'the composition is told the profile');
 });
 
 test('run: honors CCR_SIDEBAR_PCT (@AC2)', () => {

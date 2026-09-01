@@ -420,6 +420,8 @@ function withDefaults(deps) {
     prepareInstance: deps.prepareInstance
       || ((/** @type {{slot:number,stateDir:string}} */ s, /** @type {any} */ o) =>
         require('./instance-name').prepareInstance(s, { ...o, home: deps.home || os.homedir() })),
+    explicitTitle: deps.explicitTitle
+      || ((/** @type {any} */ o) => require('./instance-name').explicitTitle(o)),
     removeExited: deps.removeExited || defaultRemoveExited,
     writeSettings: deps.writeSettings || ((s) => inject.writeSettingsFile(s)),
     cleanup: deps.cleanup || ((f) => inject.cleanupSettingsFile(f)),
@@ -583,7 +585,10 @@ function run(profile, deps = {}, opts = {}) {
       sidebarPct: Number.isFinite(pct) ? pct : DEFAULT_SIDEBAR_PCT,
       sidebarSide: d.env.CCR_SIDEBAR_SIDE || DEFAULT_SIDEBAR_SIDE,
       termCols: d.cols,
-      title: inst ? inst.title : undefined,
+      // A null slot is an explicitly-namespaced launch (CCR_SESSION /
+      // CCR_STATE_DIR preset): no slot, but the tab still gets its address —
+      // the tmux path composes the same way (bin/ccr.js).
+      title: inst ? inst.title : d.explicitTitle({ profile, name: opts.name, cwd: d.cwd || undefined }),
       cwd: paneCwd,
     });
   } catch (e) {
@@ -621,6 +626,7 @@ function run(profile, deps = {}, opts = {}) {
  * @property {(dir: string) => void} clearLaunchDir
  * @property {(o: {profile?: string, env: NodeJS.ProcessEnv, home: string}) => ({slot: number, session: string, stateDir: string, attached: boolean}|{exhausted: true}|null)} allocateSlot
  * @property {(slot: {slot: number, stateDir: string}, o: {profile?: string, name?: string|null}) => {name: string, title: string}} prepareInstance
+ * @property {(o: {profile?: string, name?: string|null, cwd?: string}) => string} explicitTitle
  * @property {(dir: string) => void} removeExited
  * @property {(settings: object) => string} writeSettings
  * @property {(file: string) => void} cleanup

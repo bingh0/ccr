@@ -75,8 +75,13 @@ module.exports = function defineInstanceIdentitySteps(reg) {
       const nameIx = args.indexOf('--name');
       const explicit = nameIx >= 0 ? args[nameIx + 1] : null;
       const profile = args.find((a, i) => !a.startsWith('-') && (nameIx < 0 || i !== nameIx + 1));
-      const slot = slots.allocateSlot({ env: {}, home: home(w) });
-      if (!slot || 'exhausted' in slot) { w.title = ''; return; }
+      const slot = slots.allocateSlot({ env: w.presetEnv || {}, home: home(w) });
+      if (slot && 'exhausted' in slot) { w.title = ''; return; }
+      if (!slot) {
+        // The preset-env scenario: no slot, same title decision as run().
+        w.title = naming.explicitTitle({ profile, name: explicit, cwd: w.launchCwd || home(w) });
+        return;
+      }
       const inst = naming.prepareInstance(slot, { profile, name: explicit, cwd: w.launchCwd || home(w), home: home(w) });
       w.title = inst.title;
       slots.retireInstance(slot.stateDir, { home: home(w), sidecarAlive: () => false });
@@ -87,6 +92,9 @@ module.exports = function defineInstanceIdentitySteps(reg) {
     delete env.CCR_SESSION;
     delete env.CCR_STATE_DIR;
     delete env.TERM_PROGRAM;
+    // The preset-env scenario reintroduces them DELIBERATELY, pointed at this
+    // world's own home — never inherited from the machine running the suite.
+    Object.assign(env, w.presetEnv || {});
     const r = spawnSync(process.execPath, [CCR_JS, ...args], { env, encoding: 'utf8', cwd: w.launchCwd || home(w) });
     const m = /title=(.*)/.exec(String(r.stdout || ''));
     w.title = m ? m[1].trim() : '';
@@ -107,6 +115,13 @@ module.exports = function defineInstanceIdentitySteps(reg) {
 
   reg.define(/^a bare ccr launched from repository "([^"]+)"$/, (w, name) => {
     w.launchCwd = makeRepo(w, String(name));
+  });
+
+  reg.define(/^a bare ccr launched from repository "([^"]+)" with CCR_SESSION and CCR_STATE_DIR preset$/, (w, name) => {
+    w.launchCwd = makeRepo(w, String(name));
+    const stateDir = path.join(home(w), '.ccr', 'instances', `named-${name}`);
+    fs.mkdirSync(stateDir, { recursive: true });
+    w.presetEnv = { CCR_SESSION: `ccr-${name}`, CCR_STATE_DIR: stateDir };
   });
 
   reg.define(/^ccr launched with CCS profile "cc1" from repository "([^"]+)"$/, (w, name) => {
