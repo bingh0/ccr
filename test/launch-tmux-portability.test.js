@@ -81,16 +81,30 @@ test('true colour is declared, since mosh drops COLORTERM and tmux then downgrad
 });
 
 test('the OSC-52 override names the "c" selection, which is all mosh accepts', () => {
-  const ms = conf().split('\n').find((l) => l.includes('Ms='));
+  const ms = conf().split('\n').find((l) => !l.trimStart().startsWith('#') && l.includes('Ms='));
   assert.ok(ms, 'the clipboard override is present');
   assert.match(ms, /Ms=\\E\]52;c%p1%\.0s;%p2%s\\007/,
     'selection spelled "c", p1 consumed by %p1%.0s, BEL as \\007');
+});
+
+test('the override is single-quoted — double quotes eat the \\E', () => {
+  // Inside a double-quoted tmux config string the parser consumes the
+  // backslash of the unknown escape \E, storing a literal `E]52;…`. tmux then
+  // emits that as plain text: the copy lands in the tmux buffer, the message
+  // says "copied", and the client clipboard is never set. The source text
+  // still READS correctly, which is why the Ms-spelling test above cannot
+  // catch it — this regression shipped in 0.6.0. Only `show -s
+  // terminal-overrides` betrays it (Ms=E]52 instead of Ms=\E]52).
+  const ms = conf().split('\n').find((l) => !l.trimStart().startsWith('#') && l.includes('Ms=')) || '';
+  assert.match(ms, /terminal-overrides\s+',[^']*Ms=[^']*'\s*$/,
+    'the Ms override value must be single-quoted so \\E survives config parsing');
+  assert.doesNotMatch(ms, /"/, 'no double quotes anywhere on the Ms line');
 });
 
 test('the override uses \\007 and never \\7', () => {
   // tmux 3.x SILENTLY discards a terminal-overrides value containing \7 — no
   // error, and `show -s terminal-overrides` just omits it. Every older guide on
   // the web uses \7, so this is an easy and invisible regression to reintroduce.
-  const ms = conf().split('\n').find((l) => l.includes('Ms=')) || '';
+  const ms = conf().split('\n').find((l) => !l.trimStart().startsWith('#') && l.includes('Ms=')) || '';
   assert.doesNotMatch(ms, /\\7(?!\d)/, 'must not use the \\7 spelling tmux 3.x rejects');
 });
