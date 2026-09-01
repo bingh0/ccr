@@ -45,6 +45,7 @@ const defineGitCommitGraphSteps = require('./git-commit-graph.steps');
 const defineGitPaneSafetySteps = require('./git-pane-safety.steps');
 const defineSidecarHotkeysSteps = require('./sidecar-hotkeys.steps');
 const defineSubagentChannelsSteps = require('./subagent-channels.steps');
+const defineSubagentsViewSteps = require('./subagents-view.steps');
 
 /**
  * Feature-file basename → its step definer. A feature with no entry here runs
@@ -83,4 +84,5 @@ module.exports = {
   'git-pane-safety': defineGitPaneSafetySteps,
   'sidecar-hotkeys': defineSidecarHotkeysSteps,
   'subagent-channels': defineSubagentChannelsSteps,
+  'subagents-view': defineSubagentsViewSteps,
 };

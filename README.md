@@ -30,8 +30,9 @@ shows you the **economy** of a session:
   directly (packfiles included) — no `git` binary is ever run, and the pane
   can't write or execute anything, structurally.
 - **External tool panes** — the sidebar can render read-only status panes from
-  other tools via a strict JSON contract; **F3** cycles between the economy
-  panel, the built-in git pane, and each configured pane (see
+  other tools via a strict JSON contract; **F3** cycles between the four
+  built-in views — the economy panel, the git pane, the feed, the subagent
+  roster — and each configured pane (see
   [External tool panes](#external-tool-panes-sidebar)).
 
 For scripting and external tools (status bars, menu-bar widgets), `ccr economy
@@ -170,8 +171,8 @@ latency.)
 
 The live sidebar can host **read-only panes from other tools**. A tool writes a
 small JSON blob beside its own artifacts; you list that file's path in ccr's
-config; the sidebar cycles between the economy panel, the built-in git pane, and
-each configured pane.
+config; the sidebar cycles between the four built-in views — the economy panel,
+the git pane, the feed and the subagent roster — and each configured pane.
 
 **Cycling views.** Under tmux the launcher binds **F3** at the host. **Windows
 Terminal** binds no key of its own, and neither do VS Code and its forks (Cursor,
@@ -181,7 +182,8 @@ key lives in a separate parent process that runs the panel as a child, the same
 separation tmux enforces. Anywhere else, `ccr cycle-view -i <name>` (or
 `--state-dir <dir>`); a bare `ccr cycle-view` resolves the instance from your
 working directory, like `ccr economy` does.
-`ccr sidecar --view <n>` opens on a chosen view (0 economy, 1 git, 2+ panes).
+`ccr sidecar --view <n>` opens on a chosen view (0 economy, 1 git, 2 feed,
+3 subagents, 4+ panes).
 
 Config lives at `~/.config/ccr/config.json` (`$XDG_CONFIG_HOME` respected,
 `CCR_CONFIG` overrides) — deliberately *not* in ccr's state dir, and never
@@ -226,11 +228,11 @@ trace  gherkin-trace   3/3
   stripped of control bytes before it touches your terminal.
 - **Producers never know ccr exists.** You wire the join by hand, exactly like
   Claude Code's own `statusLine` — neither side takes a dependency on the other.
-- **Config order is cycle order.** F3 goes economy panel → git pane → first pane
-  → second pane → back to economy; the `3/3` above is that position, for the one
-  configured pane in the example. The position marker appears only once you have
-  configured a pane — the two built-in views identify themselves, so numbering
-  them buys nothing. Entries are never de-duplicated, so listing one path twice
+- **Config order is cycle order.** F3 goes economy panel → git pane → feed →
+  subagent roster → first pane → second pane → back to economy; the `3/3` above
+  is that position, for the one configured pane in the example. The position
+  marker appears only once you have configured a pane — the built-in views
+  identify themselves, so numbering them buys nothing. Entries are never de-duplicated, so listing one path twice
   gives you two panes. The config is re-read every tick — adding a pane takes
   effect without relaunching.
 - **The producer is trusted for content, never for behaviour.** ccr executes

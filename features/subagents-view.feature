@@ -35,7 +35,8 @@
 # - DEBT (like git-pane-safety before it): no @security tags yet —
 #   test/security-tags.test.js refuses an unbound @security scenario even in
 #   wip. The escape-sequence and verbatim-secrets scenarios below earn the
-#   tag when their steps bind.
+#   tag when their steps bind. PAID 2026-09-01: both bind through composeFrame
+#   and both now carry the tag.
 
 Feature: Watching a session's subagents at a glance
   As someone running Claude Code sessions that fan work out to subagents
@@ -166,12 +167,14 @@ Feature: Watching a session's subagents at a glance
     Then the nested agent holds its own block
     And that block carries a prefix tying it to its parent
 
+  @security
   Scenario: Escape sequences inside agent words render inert
     Given an agent whose latest words contain terminal escape sequences
     When the block renders
     Then those words appear as plain inert text
     And the panel redraws normally afterwards
 
+  @security
   Scenario: Words quoting secrets render verbatim, never masked
     Given an agent whose latest words contain "sk-ant-api03-9f2e7b1c4d6e"
     When the block renders

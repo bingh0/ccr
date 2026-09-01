@@ -60,11 +60,6 @@ const WHOLE_FEATURE_WIP = [
   // git pane applies — agreed criteria are worth holding the build to, and
   // agreed criteria are not a feature. Entries leave as their steps bind.
   {
-    feature: 'subagents-view',
-    reason: 'The S2 roster view is unbuilt; steps bind when src/sidecar renders agent blocks from Claude Code transcripts.',
-    ruledOn: '2026-08-23',
-  },
-  {
     feature: 'subagent-mirror',
     reason: 'ccr subagents does not exist yet; steps bind with the CLI command and its JSON output.',
     ruledOn: '2026-08-23',
@@ -74,6 +69,13 @@ const WHOLE_FEATURE_WIP = [
   // every scenario binds against a real projects tree — including the doctor
   // scenario, which runs the real doctor before and after the channels exist
   // and holds it to the same output.
+  // 'subagents-view' left it the same day, with the S2 view itself: the roster
+  // renders through composeFrame's own view cycle (src/render/subagents.js at
+  // view 3, the rotation R27 ratified), every scenario drives that production
+  // draw loop against a real projects tree under a sandbox home, and the two
+  // scenarios the fence recorded as @security debt — escape sequences rendering
+  // inert, and secrets rendering verbatim — carry the tag now that their steps
+  // bind (test/security-tags.test.js).
 ];
 
 /**

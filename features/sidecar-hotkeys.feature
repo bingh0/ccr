@@ -94,6 +94,8 @@ Feature: Reaching every view on a host that binds no key
       | view |
       | 0    |
       | 1    |
+      | 2    |
+      | 3    |
 
   Scenario: A view index that is not one is refused rather than guessed
     When ccr is run with "sidecar --view banana"

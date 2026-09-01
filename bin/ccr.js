@@ -47,7 +47,8 @@ Options:
       --mary         Enable the mary interface
 
 Sidecar options:
-      --view <n>  Open on a view: 0 economy, 1 git, 2+ configured panes
+      --view <n>  Open on a view: 0 economy, 1 git, 2 feed, 3 subagents,
+                  4+ configured panes
       --keys      Cycle views with F3 or Space, for terminals that bind no key`;
 
 /**
@@ -93,7 +94,7 @@ function main(argv) {
   if (values.view != null) {
     view = Number(values.view);
     if (!Number.isInteger(view) || view < 0) {
-      process.stderr.write(`ccr: --view takes a view index (0 = economy, 1 = git), got "${values.view}"\n`);
+      process.stderr.write(`ccr: --view takes a view index (0 = economy, 1 = git, 2 = feed, 3 = subagents), got "${values.view}"\n`);
       return 2;
     }
   }
@@ -311,7 +312,8 @@ function cmdResume(arg) {
  * instructions + re-copies the one-liner instead of running the panel.
  * `--exit-on-end` closes the panel shortly after the session ends (the Windows
  * Terminal launcher passes it so its `cmd /c` pane sweeps closed like tmux).
- * `--view <n>` opens on a chosen view (0 economy, 1 git, 2…N configured panes).
+ * `--view <n>` opens on a chosen view (0 economy, 1 git, 2 feed, 3 subagents,
+ * 4…N configured panes).
  *
  * `--keys` makes THIS process the hotkey host and runs the panel as a child, for
  * terminals that bind no key of their own (VS Code and its forks). The renderer

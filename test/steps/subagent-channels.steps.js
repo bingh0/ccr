@@ -53,7 +53,11 @@
 //     mutant then failed on `type`.
 //   "the view shows the \"no subagents\" line rather than invented blocks" —
 //     doctored the drifted world to leave ONE dispatch in a shape ccr still
-//     knows: `empty` went false and the step failed on the block count.
+//     knows: `empty` went false and the step failed on the block count. Rebound
+//     2026-09-01 to render the drifted world through composeFrame's subagents
+//     view as well, and re-mutated there: a renderer that drew its blocks
+//     regardless of `empty` failed on the rendered block count, and the same
+//     one-surviving-dispatch mutant failed on the pane's own rows.
 //   "doctor's checks and output are unchanged by this feature" — doctored
 //     src/doctor.js to append a channel-health line counting the agent files
 //     under its homedir. SURVIVED at first: the fixture's projects tree lived
@@ -70,7 +74,8 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { readRoster, createTail, tick, listChannels, PER_FILE_MAX } = require('../../src/subagents');
-const { rosterView } = require('../../src/subagents');
+const { rosterView, __resetRosterState } = require('../../src/subagents');
+const { composeFrame } = require('../../src/sidecar');
 const doctor = require('../../src/doctor');
 const { buildSession } = require('./_subagent-fixture');
 const { refuteWithControl } = require('./_absence');
@@ -81,6 +86,9 @@ const NOW = T0 + 120_000;
 
 /** The pane's row budget stands in for "the slots" wherever a view is taken. */
 const SLOTS = 4;
+
+/** The view index the subagent roster occupies (economy 0, git 1, feed 2). */
+const SUBAGENTS_VIEW = 3;
 
 /** One redraw tick's budget, as the scenario states it. */
 const TICK_BUDGET_MS = 1000;
@@ -246,6 +254,31 @@ module.exports = function defineSubagentChannelsSteps(reg) {
     for (const f of fs.readdirSync(s.subagents)) {
       fs.renameSync(path.join(s.subagents, f), path.join(s.subagents, f.replace(/^agent-/, 'worker-').replace(/\.jsonl$/, '.ndjson')));
     }
+    // The pane, not only the model: the "no subagents" LINE is the S2 view's
+    // wording of the empty truth, and a Then that stopped at `view.empty` would
+    // certify the derivation while the pane invented rows. So the drifted
+    // session gets the two things composeFrame needs — a HOME the projects tree
+    // sits under, and a state dir whose snapshot names the transcript.
+    for (const key of ['HOME', 'USERPROFILE']) {
+      const prev = process.env[key];
+      process.env[key] = w.home;
+      w.defer(() => { if (prev == null) delete process.env[key]; else process.env[key] = prev; });
+    }
+    w.driftStateDir = fs.mkdtempSync(path.join(w.root, 'state-drift-'));
+    fs.writeFileSync(path.join(w.driftStateDir, 'last-status.json'), JSON.stringify({
+      model: { display_name: 'Opus 5' },
+      transcript_path: s.transcript,
+      rate_limits: { five_hour: { used_percentage: 20, resets_at: Math.floor(Date.now() / 1000) + 3600 } },
+    }));
+    // Panes are pinned empty through the production config reader, so a pane
+    // the developer configured cannot renumber the view this step draws.
+    const cfg = path.join(w.root, 'config.json');
+    fs.writeFileSync(cfg, JSON.stringify({ panes: [] }));
+    const prevCfg = process.env.CCR_CONFIG;
+    process.env.CCR_CONFIG = cfg;
+    w.defer(() => { if (prevCfg == null) delete process.env.CCR_CONFIG; else process.env.CCR_CONFIG = prevCfg; });
+    __resetRosterState();
+    w.defer(() => __resetRosterState());
   });
 
   reg.define(/^channel reporting lives in the pane stale banner and ccr subagents --debug alone$/, (w) => {
@@ -365,18 +398,27 @@ module.exports = function defineSubagentChannelsSteps(reg) {
   reg.define(/^the view shows the "no subagents" line rather than invented blocks$/, (w) => {
     const drift = w.rosters['drift'];
     // `empty` is the fact the roster view publishes for the "no subagents"
-    // line; the line itself is the S2 renderer's wording of it. What binds
-    // here is that total drift yields the empty truth rather than a roster
-    // assembled out of records ccr no longer understands.
+    // line, and it is checked first because it is what BOTH doors read.
     assert.strictEqual(drift.view.empty, true, `expected an empty roster, got ${drift.view.agents.length} blocks`);
     assert.deepStrictEqual(drift.view.agents, []);
     assert.strictEqual(drift.model.agents.length, 0);
+    // And then the LINE itself, through the production draw loop: the sidecar's
+    // subagents view, composed against the drifted world. A Then that stopped
+    // at the model would leave the pane free to invent rows out of records ccr
+    // no longer understands, which is the failure this scenario is named for.
+    const frame = composeFrame(w.driftStateDir, {
+      now: NOW, view: SUBAGENTS_VIEW, cols: 60, rows: 24,
+    }).replace(/\x1b\[[0-9;]*m/g, '');
+    assert.match(frame, /no subagents/, `the pane should say so plainly:\n${frame}`);
+    assert.deepStrictEqual(frame.split('\n').filter((l) => /^ {2}(└ )?[●✓✗] /.test(l)), [],
+      `the pane drew blocks for a world it cannot read:\n${frame}`);
     // Earned absence: the drifted transcript still CONTAINS every agent fact —
     // the type, the prompt, the agent ids — so a parser that guessed would
-    // spill one of them into the model. The witness is that transcript.
+    // spill one of them into the model, and a renderer that guessed would spill
+    // it onto the pane. The witness is that transcript.
     refuteWithControl(
       /explore|map auth flow|a4e4cc6b8ee1a633e/,
-      JSON.stringify(drift.model.agents) + JSON.stringify(drift.view.agents),
+      JSON.stringify(drift.model.agents) + JSON.stringify(drift.view.agents) + frame,
       w.driftedText,
       'a block was invented out of records ccr no longer recognizes',
     );

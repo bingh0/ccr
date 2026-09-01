@@ -278,8 +278,9 @@ seeing `invalid` knows the producer wrote something well-formed and wrong.
 6. **`broken` renders as failure** — the sanitized `message`, prominently,
    with the chrome; rows ignored; never the previous healthy render.
 7. **Full-height views, cycled** — external panes join the sidecar's style
-   cycle as whole-pane views in **config order**, with a position indicator
-   in the chrome ("2/4"). Two config entries with the same path are two
+   cycle as whole-pane views in **config order**, after the four BUILT-IN views
+   (0 economy, 1 the git pane, 2 the feed, 3 the subagent roster), with a
+   position indicator in the chrome ("5/6"). Two config entries with the same path are two
    panes. Config paths are absolute or `~`-expanded; a relative path
    resolves against the config file's directory.
 8. **In-pane overflow never silently truncates** — rows beyond the pane
@@ -418,7 +419,10 @@ ruled; the subsystem is implemented and its feature files bind.
   panel must survive a typo in a config file.
 - **Cycling is a signal, not a keystroke.** External panes are whole-pane
   views selected by an index the host advances via `SIGUSR1` (`ccr cycle-view`,
-  bound to F3 by the launcher). The sidecar still reads no stdin, so the
+  bound to F3 by the launcher). The index counts the built-ins first, so the
+  i-th configured pane is view `4 + i` (2026-09-01: the feed and the subagent
+  roster joined the economy panel and the git pane as built-ins, the rotation
+  ruled at scoping on 2026-08-23). The sidecar still reads no stdin, so the
   structural invariant holds; a signal carries no payload, so there is nothing
   to inject. The pid is taken from the heartbeat and guarded by freshness plus
   a signal-0 probe — see `src/cycle-view.js` for the residual risk it does
@@ -485,8 +489,9 @@ ruled; the subsystem is implemented and its feature files bind.
   file buys — "a different pane on screen", priced in the 2026-08-02 amendment
   above. The process that receives it renders nothing and writes one counter.
 
-- **`--view <n>` opens the panel on a chosen view**, and is a starting point
-  rather than a pin: the cycle key still advances from there. It does NOT enable
+- **`--view <n>` opens the panel on a chosen view** (0 economy, 1 git, 2 feed,
+  3 subagents, 4…N the configured panes), and is a starting point rather than a
+  pin: the cycle key still advances from there. It does NOT enable
   two panels side by side on one state dir — the heartbeat allows exactly one
   live sidecar per state dir, and the second to start makes the first stand down.
 

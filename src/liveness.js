@@ -53,4 +53,8 @@ function liveness(input) {
   return { mode: 'live', marker };
 }
 
-module.exports = { liveness, DEFAULT_STALE_MS };
+// `fmtAge` is exported for the same reason it exists: one wording for "how long
+// ago", so the freshness note and the subagent roster's age markers cannot drift
+// into saying "4m" and "4 min" on two rows of the same pane
+// (src/render/subagents.js).
+module.exports = { liveness, fmtAge, DEFAULT_STALE_MS };

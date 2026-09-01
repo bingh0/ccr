@@ -97,18 +97,21 @@ module.exports = function definePaneBlobsSteps(reg) {
 
   /**
    * The view cycle, as a rule rather than as numbers scattered through the
-   * assertions: index 0 is ccr's economy view, index 1 is the built-in git
-   * pane, and the i-th CONFIGURED pane is index 2+i. Displayed positions are
-   * 1-based over the whole cycle.
+   * assertions: the BUILT-IN views come first — 0 ccr's economy view, 1 the git
+   * pane, 2 the feed, 3 the subagent roster — and the i-th CONFIGURED pane is
+   * index BUILTINS+i. Displayed positions are 1-based over the whole cycle.
    *
    * These exist because the cycle gained a view (the git pane) and every
    * hardcoded `2/2` in this file became wrong at once. A binding that states
    * the rule survives the next view; one that states a number has to be found
    * and chased, and the ones that are merely *loose* enough to keep passing are
-   * the dangerous half.
+   * the dangerous half. It survived exactly that: the feed and the subagent
+   * roster joined the built-ins on 2026-09-01 (R27's rotation) and only the
+   * constant below moved.
    */
-  const paneView = (i = 0) => 2 + i;
-  const cycleLen = (/** @type {Record<string, any>} */ w) => 2 + w.panes.length;
+  const BUILTINS = 4;
+  const paneView = (i = 0) => BUILTINS + i;
+  const cycleLen = (/** @type {Record<string, any>} */ w) => BUILTINS + w.panes.length;
   const panePos = (/** @type {Record<string, any>} */ w, i = 0) => `${paneView(i) + 1}/${cycleLen(w)}`;
   const atPos = (/** @type {string} */ p) => new RegExp(p.replace('/', '\\/'));
 

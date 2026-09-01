@@ -24,6 +24,8 @@ const { readGitRepo, discoverRepo } = require('./git-repo');
 const { computeWorkingTree } = require('./git-working-tree');
 const { readHistory } = require('./git-history');
 const { renderGitPane, laneBudget } = require('./render/git-pane');
+const { updateRoster, rosterView } = require('./subagents');
+const { renderSubagents, slotsForRows } = require('./render/subagents');
 const { readViewRequests } = require('./cycle-view');
 
 const STATE_DIR = process.env.CCR_STATE_DIR || path.join(os.homedir(), '.ccr');
@@ -239,10 +241,11 @@ function launchDir(stateDir) {
  * redraw in a narrow cmd/PowerShell/split pane. Omit it (non-TTY) for no clamp.
  *
  * `view` selects which whole-pane view to draw: 0 is ccr's own economy view, 1
- * is the built-in git pane, and 2..N are the configured external panes in config
- * order. It is taken modulo the number of views, so an index that outlives a
- * shrinking config wraps rather than showing nothing. Every view is FULL-HEIGHT,
- * never stacked beside the economy panel — one pane, one subject.
+ * the built-in git pane, 2 the full-height feed, 3 the subagent roster, and
+ * 4..N the configured external panes in config order. It is taken modulo the
+ * number of views, so an index that outlives a shrinking config wraps rather
+ * than showing nothing. Every view is FULL-HEIGHT, never stacked beside the
+ * economy panel — one pane, one subject.
  *
  * @param {string} stateDir
  * @param {{ now?: number, cols?: number, rows?: number, view?: number,
@@ -274,22 +277,40 @@ function composeFrame(stateDir, opts = {}) {
   // panel (loadPaneConfig is total — see src/pane-config.js).
   const cfg = opts.panes ? { panes: opts.panes, error: null } : loadPaneConfig();
   const panes = cfg.panes;
-  // View order: 0 economy, 1 the git pane, 2… external panes. The git pane is
-  // BUILT IN and therefore always in the cycle — including in a directory that
-  // is not a repository at all, where it says so. A view that appeared and
-  // vanished with the session's cwd would renumber the cycle underneath the
-  // user's F3 key, and "not a git repository" is itself the answer to the
-  // question this pane exists to answer.
-  const viewCount = 2 + panes.length;
+  // View order: 0 economy, 1 the git pane, 2 the feed, 3 the subagent roster,
+  // 4… external panes — the rotation the corpus ratified (R27, 2026-08-23;
+  // features/subagents-view.feature, "The subagents view sits fourth among the
+  // built-in views"). All four are BUILT IN and therefore always in the cycle,
+  // including where they have nothing to show, where each says so: a view that
+  // appeared and vanished with the session's state would renumber the cycle
+  // underneath the user's F3 key, and "not a git repository" / "no subagents"
+  // is itself the answer to the question that pane exists to answer.
+  const BUILTIN_VIEWS = 4;
+  const viewCount = BUILTIN_VIEWS + panes.length;
   const view = ((Math.trunc(opts.view || 0) % viewCount) + viewCount) % viewCount;
-  // The "n/N" position marker appears only once the cycle is longer than the two
-  // BUILT-IN views. Ruled 2026-08-05: adding the git pane made viewCount always
-  // ≥ 2, which would have put a marker on the economy panel of every user who
-  // has configured nothing — a visible change to a shipped surface, bought for
-  // nothing, since two self-identifying views need no numbering to tell apart.
-  // A user who has configured a pane keeps the markers they already had.
-  const showPosition = viewCount > 2;
+  // The "n/N" position marker appears only once the cycle is longer than the
+  // BUILT-IN views. Ruled 2026-08-05 for the git pane and carried forward here:
+  // numbering the built-ins would put a marker on the economy panel of every
+  // user who has configured nothing — a visible change to a shipped surface,
+  // bought for nothing, since self-identifying views need no numbering to tell
+  // apart. A user who has configured a pane keeps the markers they already had.
+  const showPosition = viewCount > BUILTIN_VIEWS;
   const positionAt = (/** @type {number} */ i) => (showPosition ? `${i + 1}/${viewCount}` : '');
+  /**
+   * The captured snapshot, or null when there is none yet. Read here rather than
+   * only in the economy branch because the feed and subagent views need the
+   * transcript path it carries — and `currentTranscriptPath` is what CONFINES
+   * that path to the projects tree, so neither view may take it from anywhere
+   * else (src/transcripts.js states the rule; src/subagents.js derives the
+   * agents directory from the confined path and never from a snapshot field).
+   */
+  const readSnapshot = () => {
+    // Capped, regular-files-only: a fifo here would block this synchronous loop
+    // forever and an unbounded file can blank the panel (src/safe-read.js).
+    const raw = readTextCapped(snapshot) || '';
+    if (!raw.trim()) return null;
+    try { return JSON.parse(raw); } catch { return null; }
+  };
   if (view === 1) {
     // Guarded exactly like the external-pane branch: a bad repository must cost
     // its own pane and nothing else (features/git-pane-safety.feature).
@@ -323,8 +344,77 @@ function composeFrame(stateDir, opts = {}) {
       return clamp(dim('ccr · git pane error: ' + msg.slice(0, 120)) + '\n');
     }
   }
-  if (view > 1) {
-    const pane = panes[view - 2];
+  if (view === 2) {
+    // The FEED, full height. It was already a shipped surface — rendered in a
+    // few lines UNDER the economy panel — but never a view, and R27 put it
+    // third in the rotation. So it becomes a view here with the whole pane's
+    // rows to spend, and the economy panel's under-feed is left exactly as it
+    // was: that is a surface users have, and nothing sanctioned changing it.
+    // Guarded like every other pane branch: one bad tail costs this view alone.
+    try {
+      const paneCols = typeof cols === 'number' && cols > 0 ? cols : 48;
+      const st = readSnapshot();
+      const tpath = st ? currentTranscriptPath(st) : null;
+      // Chrome: the instance-name line, the feed's own header and its stats row.
+      const maxEvents = Math.max(1, (opts.rows || resolveRows() || 24) - 3);
+      let out = tpath ? renderFeed(updateFeed(tpath), { max: maxEvents, width: paneCols }) : '';
+      // A feed with nothing in it still has to identify itself — a blank pane
+      // in the middle of the cycle reads as a broken view rather than a quiet
+      // session. Same wording renderFeed uses for a session that has called no
+      // tool yet, so the two states do not look like two different products.
+      if (!out) out = '  ' + bold('feed') + dim('  ·  ' + (tpath ? '(no tool calls yet)' : '(waiting for the session)'));
+      if (showPosition) {
+        // The marker goes on the feed's own header line, and the line is cut to
+        // make room for it FIRST. renderFeed budgets to `width` knowing nothing
+        // about a marker, so appending one and leaving it to the final clamp is
+        // how a narrow pane silently loses the position it was told to show.
+        const markerText = `   ${positionAt(view)}`;
+        const nl = out.indexOf('\n');
+        const first = nl === -1 ? out : out.slice(0, nl);
+        const rest = nl === -1 ? '' : out.slice(nl);
+        const room = typeof cols === 'number' && cols > 0 ? Math.max(1, cols - markerText.length) : undefined;
+        out = clampVisible(first, room) + dim(markerText) + rest;
+      }
+      return clamp(out + '\n');
+    } catch (e) {
+      const msg = stripControl(e && e instanceof Error ? e.message : String(e)) || 'unknown';
+      return clamp(dim('ccr · feed error: ' + msg.slice(0, 120)) + '\n');
+    }
+  }
+  if (view === 3) {
+    // The SUBAGENT ROSTER (features/subagents-view.feature). Guarded exactly
+    // like the git branch above: an exception here costs this pane and nothing
+    // else, with the message sanitized and bounded because it is one of the few
+    // surfaces that can print text ccr did not author.
+    try {
+      const paneCols = typeof cols === 'number' && cols > 0 ? cols : 48;
+      const st = readSnapshot();
+      const tpath = st ? currentTranscriptPath(st) : null;
+      // No transcript yet is NOT "no subagents": the first says ccr has nothing
+      // to read, the second says it read the session and found no agents. The
+      // renderer draws them as two different lines, and passing null is how it
+      // is told which one is true.
+      let roster = null;
+      if (tpath) {
+        // `updateRoster` tails incrementally and RESETS ITS OWN TAIL when the
+        // transcript path changes (src/subagents.js `tick`: `if (tail.path !==
+        // transcriptPath) resetTail(...)`), which is the session-switch reset
+        // `resetFeedState` does for the feed. Verified rather than assumed —
+        // a tail that kept its byte offsets across a session switch would read
+        // the new transcript from the old one's length and lose its opening.
+        roster = rosterView(updateRoster(tpath, { now }), {
+          now,
+          slots: slotsForRows(opts.rows || resolveRows() || 24),
+        });
+      }
+      return clamp(renderSubagents(roster, { width: paneCols, position: positionAt(view) }) + '\n');
+    } catch (e) {
+      const msg = stripControl(e && e instanceof Error ? e.message : String(e)) || 'unknown';
+      return clamp(dim('ccr · subagents error: ' + msg.slice(0, 120)) + '\n');
+    }
+  }
+  if (view > 3) {
+    const pane = panes[view - BUILTIN_VIEWS];
     // Guarded like the economy branch below: "a malformed file must cost a pane
     // state, never the sidecar" is the contract's rule, and leaving it to rest
     // on the renderer never throwing would make it one careless edit from false.
@@ -494,8 +584,9 @@ function __resetViewState() { currentView = 0; seenRequests = null; }
  * clearing the file — it now belongs to the newer panel. `beat`/`clearBeat`/
  * `onYield` are injectable so the takeover is unit-testable too.
  *
- * `view` sets which view the panel OPENS on (0 economy, 1 the git pane, 2…N the
- * configured panes). It is a starting point, not a pin: the cycle key still
+ * `view` sets which view the panel OPENS on (0 economy, 1 the git pane, 2 the
+ * feed, 3 the subagent roster, 4…N the configured panes). It is a starting
+ * point, not a pin: the cycle key still
  * advances from there. It cannot be used to put two panels side by side on one
  * state dir — the heartbeat allows exactly one live sidecar per state dir, and
  * the second to start makes the first stand down.

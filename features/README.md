@@ -47,6 +47,20 @@ so every scenario below runs and passes. The fence that goes with them is
 | `git-pane-safety.feature` | a bad repo spoils at most its own pane |
 | `git-pane-placement.feature` | cycling alongside the economy panel, across instances |
 
+### Scoped 2026-08-23, the subagent observability views
+
+The reviewed acceptance criteria for ccr's fourth built-in view and the machine
+door beside it, produced by a `/scope` interview on 2026-08-23 and confirmed by
+the visionary. They entered the `wip` register in `test/wip-register.js` as
+declared debt and each basename leaves it as its steps bind. The fence is the
+section "The subagent observability views" in [`OUT-OF-SCOPE.md`](OUT-OF-SCOPE.md).
+
+| Feature file | Behavior |
+|---|---|
+| `subagent-channels.feature` | reading Claude Code's own records fail-open when they drift (bound 2026-09-01) |
+| `subagents-view.feature` | the S2 roster pane: who is alive, what each last said, what each spent (bound 2026-09-01) |
+| `subagent-mirror.feature` | `ccr subagents` — the same facts through a machine door (unbound) |
+
 The Windows fast release and the VS Code split-terminal path trace to
 [`../SPEC.md`](../SPEC.md); their scenarios are tagged `@AC#` back to the
 acceptance criteria in SPEC §8 and §10 (`@AC9` = keep-tests-green / unit

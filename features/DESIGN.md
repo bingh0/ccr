@@ -111,3 +111,33 @@ the same records.
   those scenarios would stop catching. Sanctioned by the shape section's
   derivation-layer ruling ("both consumers render from it; parity scenarios in
   subagent-mirror.feature hold them together").
+- 2026-09-01 — the FEED becomes a view. R27 ratified the rotation economy →
+  git → feed → subagents → optional panes, but the feed was never a view: it
+  has always been rendered in a few lines UNDER the economy panel, and
+  composeFrame counted two built-ins. A full-height feed view at index 2 is the
+  smallest build that honours the ratified order — it reuses `renderFeed` and
+  the incremental tail unchanged, and the economy panel's under-feed is left
+  exactly as it was, because that is a shipped surface and nothing sanctioned
+  changing it. Built-ins therefore become four, the position marker's rule
+  becomes `viewCount > 4`, and external panes index from 4. Sanctioned by R27
+  (the fourth-position rotation ruling, 2026-08-23) together with the fence's
+  "Sanctioned changes" section, which anticipated exactly this renumbering.
+- 2026-09-01 — SLOT ARITHMETIC: the pane's row budget yields
+  `floor((rows − 4) / 2)` slots, because shape S2 is two rows per agent (the
+  head row and its activity row) and four rows are chrome — the instance-name
+  line every frame carries, the view's own header, the overflow line and the
+  stale marker. The last two are conditional and are reserved unconditionally:
+  that costs at most one block and buys a roster that can never grow a line
+  past the pane's last row, which is the soft wrap that corrupts the sidecar's
+  cursor-home redraw. The rule lives in one exported function
+  (`slotsForRows`) so composeFrame and the acceptance steps cannot disagree
+  about what "four roster slots" means. Sanctioned by R15's burst cap read with
+  the fence's deferral of policy defaults to the builder.
+- 2026-09-01 — the token figure is ABBREVIATED with `tok` from
+  src/render/shared.js (`18K`, `1.2M`), the same unit the economy panel and the
+  feed already use. The scenarios pin that a block shows its token count and
+  leave the presentation open; a raw six-digit integer would cost the task
+  column six columns on a 40-column pane for precision nobody reads at a
+  glance, and a second spelling of the same quantity on one screen is exactly
+  the drift the shared helper exists to prevent. Sanctioned by the shape
+  section's "presentation below the contract" note in the fence's debt list.
