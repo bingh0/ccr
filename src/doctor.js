@@ -73,8 +73,8 @@ function run(opts = {}) {
   let problems = 0;
 
   const [maj, min] = process.versions.node.split('.').map(Number);
-  const nodeOk = maj > 18 || (maj === 18 && min >= 3);
-  out.push(nodeOk ? ok(`node ${process.version}`) : bad(`node ${process.version} — need >= 18.3`));
+  const nodeOk = maj > 22 || (maj === 22 && min >= 17);
+  out.push(nodeOk ? ok(`node ${process.version}`) : bad(`node ${process.version} — need >= 22.17`));
   if (!nodeOk) problems++;
 
   const ccr = hasFn('ccr');

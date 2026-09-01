@@ -27,7 +27,7 @@ function runDoctor(/** @type {Record<string, any>} */ w) {
 module.exports = function defineDoctorWindowsSteps(reg) {
   // Background + Givens
   reg.define(/^the platform is win32$/, (w) => { w.platform = 'win32'; });
-  reg.define(/^Node 18\.3\+ is installed$/, () => {});
+  reg.define(/^Node 22\.17\+ is installed$/, () => {});
   reg.define(/^`ccr` is on PATH$/, (w) => { (w.present ||= {}).ccr = 'C:\\ccr.cmd'; });
   reg.define(/^`wt\.exe` is resolvable$/, (w) => { (w.present ||= {}).wt = 'C:\\wt.exe'; });
   reg.define(/^`wt\.exe` is not resolvable$/, (w) => { (w.present ||= {}).wt = null; });

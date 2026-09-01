@@ -20,9 +20,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 18 is the advertised floor (engines >=18.3); 24 is the latest.
+        # 22.17 is the advertised floor (engines >=22.17) — pinned exactly so
+        # the floor is tested, not just declared; it matches the floor of the
+        # vendored gherkin-node-test runner the whole suite executes on. 22
+        # and 24 float to each line's latest (22 rides maintenance to 2027-04,
+        # 24 is active LTS). 18 and 20 are past their end of life and the
+        # 0.11 runner does not support them.
         os: [ubuntu-latest, macos-latest, windows-latest]
-        node: [18, 20, 22, 24]
+        node: ['22.17', 22, 24]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

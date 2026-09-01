@@ -11,7 +11,7 @@ Feature: Windows native launcher
 
   Background:
     Given the platform is win32
-    And Node 18.3+ is installed
+    And Node 22.17+ is installed
     And `claude` is resolvable on PATH
     And `wt.exe` (Windows Terminal) is resolvable on PATH
 

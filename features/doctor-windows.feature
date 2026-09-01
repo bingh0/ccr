@@ -13,7 +13,7 @@ Feature: doctor Windows environment check
 
   @AC1
   Scenario: doctor reports a healthy Windows setup
-    Given Node 18.3+ is installed
+    Given Node 22.17+ is installed
     And `ccr` is on PATH
     And `wt.exe` is resolvable
     When I run "ccr doctor"

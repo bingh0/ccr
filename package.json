@@ -17,7 +17,7 @@
     "ccr": "bin/ccr.js"
   },
   "engines": {
-    "node": ">=18.3"
+    "node": ">=22.17"
   },
   "files": [
     "bin",

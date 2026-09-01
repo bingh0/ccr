@@ -19,7 +19,7 @@ function runLauncher(/** @type {Record<string, any>} */ world, /** @type {string
 module.exports = function defineWindowsLauncherSteps(reg) {
   // Background
   reg.define(/^the platform is win32$/, (w) => { w.platform = 'win32'; });
-  reg.define(/^Node 18\.3\+ is installed$/, () => {});
+  reg.define(/^Node 22\.17\+ is installed$/, () => {});
   reg.define(/^`claude` is resolvable on PATH$/, (w) => { (w.present ||= {}).claude = true; });
   reg.define(/^`wt\.exe` \(Windows Terminal\) is resolvable on PATH$/, (w) => { (w.present ||= {}).wt = true; });
 

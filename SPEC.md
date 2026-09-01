@@ -287,7 +287,7 @@ New behavior:
 
 ## 8. Acceptance criteria
 
-The fast release is done when, on a clean Windows 11 box with Node ≥ 18.3,
+The fast release is done when, on a clean Windows 11 box with Node ≥ 22.17,
 Claude Code, and Windows Terminal:
 
 1. `ccr doctor` reports node, ccr-on-PATH, and **Windows Terminal found**, with no
