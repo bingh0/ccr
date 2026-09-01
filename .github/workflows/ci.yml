@@ -38,3 +38,9 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run typecheck
+      # The publish-time gates used to run ONLY at publish, on one machine —
+      # which is how scan-package went inert for a whole release without
+      # anyone seeing it. The scan's own probe is pinned in the suite above
+      # now; lint runs here so nothing in the prepublish chain is unobserved
+      # until the moment it is load-bearing.
+      - run: npm run lint
