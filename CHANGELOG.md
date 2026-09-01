@@ -7,6 +7,43 @@ version is worth upgrading to, and where to read the rest.
 
 Dates are npm publish dates, because that is when a version reached anyone.
 
+## 0.6.1 — 2026-09-01
+
+0.6.0's headline clipboard fix was inert. It shipped correct in the source and
+wrong in tmux — the one failure this repository's tests were not built to see,
+because every one of them read the config file rather than asking tmux.
+
+- **The clipboard override reaches tmux intact.** The value was written in
+  double quotes, and tmux's double-quoted config parser consumes the backslash
+  of the unknown escape `\E`: it stored a literal `E]52;...` and emitted that as
+  plain text. The copy still landed in the tmux buffer and `copied N chars`
+  still appeared on screen, so nothing looked wrong — and no clipboard was ever
+  set. Single quotes keep the backslash. `tmux show -s terminal-overrides` now
+  reads back `Ms=\E]52` where it read `Ms=E]52` before, and a copy over
+  mosh/ssh reaches the clipboard of a separate local terminal.
+- **`ccr doctor` reads the override back out of tmux.** The source text said
+  the right thing for a whole release while the shipped behaviour was wrong, so
+  doctor no longer takes the file's word for it: it parses the shipped config
+  in a throwaway tmux server on a private socket and reports what tmux actually
+  stored. The verdict is pinned by a negative control that watches a real tmux
+  eat a double-quoted value — a check never seen to fail is not yet known to be
+  a check. An unreadable probe is still reported as unreadable, never
+  manufactured into a failure.
+- **The tarball privacy scan was reading nothing.** `scan-package` asks npm
+  which files would ship; npm 12 changed that JSON to an object keyed by
+  package name. The script reached for the older shape, got no file list, and
+  printed `package scan clean — 0 file(s)` — clean because it had looked at
+  nothing, and it did so through the 0.6.0 publish. It now understands every
+  shape npm has shipped, and an unrecognised one REFUSES rather than passing:
+  a guard whose input can silently go empty is not a guard. Run over the real
+  48 files, the tarball is clean.
+
+Who was affected: the override keys on `xterm-256color`, which is the TERM mosh
+forces, so remote sessions lost every copy. A session whose client reports its
+own TERM and carries its own `Ms` — ghostty's `xterm-ghostty`, locally — never
+used the override and never saw the bug. Upgrading needs a relaunch: tmux
+resolves terminal capabilities when a client attaches, not when the file changes.
+
 ## 0.6.0 — 2026-09-01
 
 The remote-session release. Over mosh, two things had been degrading in
