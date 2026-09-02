@@ -72,9 +72,15 @@ function resolveInstance(o = {}) {
   // 1. An explicit -i target, from the live set only. A typo matches nothing
   // and errors — it reaches something else only by landing exactly on another
   // live name.
+  //
+  // The refusal NAMES THE FLAG the target arrived on, because the reader of a
+  // failed `ccr subagents -i 9` needs to know which of the words they typed ccr
+  // could not honour (features/subagent-mirror.feature, "stderr names the -i
+  // flag and the failure"). The rest of the sentence is unchanged, so every
+  // caller that recognises this refusal by its wording still does.
   if (o.target != null) {
     const hit = live.find((i) => i.name === o.target);
-    if (!hit) return { ok: false, error: `ccr: no live instance named '${o.target}'` };
+    if (!hit) return { ok: false, error: `ccr: -i ${o.target}: no live instance named '${o.target}'` };
     return { ok: true, stateDir: hit.stateDir, name: hit.name };
   }
 

@@ -29,6 +29,10 @@ shows you the **economy** of a session:
   recent commits drawn in lanes like an IDE git graph. Read from `.git`
   directly (packfiles included) — no `git` binary is ever run, and the pane
   can't write or execute anything, structurally.
+- **Subagent roster** — when Claude fans work out to subagents, the sidebar's
+  fourth view shows who is alive, what each one last said, how long it has been
+  running and what it has spent. `ccr subagents` prints the same facts as JSON
+  (see [Reading the roster](#reading-the-roster-ccr-subagents)).
 - **External tool panes** — the sidebar can render read-only status panes from
   other tools via a strict JSON contract; **F3** cycles between the four
   built-in views — the economy panel, the git pane, the feed, the subagent
@@ -36,8 +40,8 @@ shows you the **economy** of a session:
   [External tool panes](#external-tool-panes-sidebar)).
 
 For scripting and external tools (status bars, menu-bar widgets), `ccr economy
---json` emits a stable, versioned model — see
-[`docs/JSON-CONTRACT.md`](docs/JSON-CONTRACT.md).
+--json` emits a stable, versioned model, and `ccr subagents` emits the roster
+above — both in [`docs/JSON-CONTRACT.md`](docs/JSON-CONTRACT.md).
 
 It is **read-only**: it never modifies `~/.claude/settings.json`, your
 credentials, or any config. It targets **subscription** plans (Pro / Max); on
@@ -60,6 +64,7 @@ npm i -g claude-code-runrate
 | `ccr economy` (CLI report) | Full panel on demand | ✅ | ✅ | ✅ |
 | `ccr economy --json` | Stable machine-readable model (scripting) | ✅ | ✅ | ✅ |
 | `ccr resume` | Recent sessions ranked by cost to resume | ✅ | ✅ | ✅ |
+| `ccr subagents` | This session's subagent roster as JSON (read-only) | ✅ | ✅ | ✅ |
 | `ccr statusline` | One-line summary wired into CC's `statusLine` | ✅ | ✅ | ✅ |
 | `ccr sidecar` | Live dashboard + tool/skills feed | ✅ tmux | ✅ tmux | ✅ Windows Terminal / VS Code |
 
@@ -137,11 +142,12 @@ if that name is already live. The name is how you see and address an instance:
   name;
 - the **sidebar** heads every view with the name;
 - **`-i <name>`** targets a live instance from anywhere: `ccr economy -i
-  side-project`, `ccr sidecar -i …`, `ccr cycle-view -i …`. Without `-i`,
-  those three commands resolve the instance from your working directory (the
-  live instance whose launch directory contains it) — and when that's
-  ambiguous they list the candidates instead of guessing. Every panel is
-  headed by the name it resolved to.
+  side-project`, `ccr sidecar -i …`, `ccr cycle-view -i …`, `ccr subagents -i …`.
+  Without `-i`, those four commands resolve the instance from your working
+  directory (the live instance whose launch directory contains it) — and when
+  that's ambiguous they list the candidates instead of guessing. Every panel is
+  headed by the name it resolved to (`ccr subagents` heads its JSON with it, as
+  the object's first property).
 
 Setting `CCR_STATE_DIR` (and/or `CCR_SESSION`) still pins an instance wherever
 you want it, and always wins over the automatic choice.
@@ -154,6 +160,30 @@ old session is still running, and names what to close.
 > `tmux ls` won't list ccr's sessions — each runs on its own socket. Use
 > `tmux -L ccr ls` (or `-L ccr-2` for slot 2 — profile launches ride slot
 > sockets too now).
+
+## Reading the roster (`ccr subagents`)
+
+When Claude fans a session out to subagents, the sidebar's fourth view shows
+them. `ccr subagents` prints **the same facts as JSON** — one object on stdout,
+exit 0 — so a script or another agent can read what your eyes get:
+
+```bash
+ccr subagents                  # the instance resolved from your working directory
+ccr subagents -i side-project  # a named live instance
+ccr subagents --all            # every live instance, rolled up
+ccr subagents -i side-project --debug   # plus the channels read and how fresh each is
+```
+
+Each agent carries its type, Claude's own dispatch prompt, its state, age,
+token count, latest words and how old they are, its latest tool call, and its
+lineage. The object's **first property is `instance`** — the name the chain
+resolved — so the reading names what it is about without breaking `| jq`.
+
+It is **read-only**: the roster is derived from Claude Code's own transcripts,
+and nothing is written into the instance's state dir — reading a session never
+disturbs it. `--all` is CLI-only by design; panes stay strictly own-session.
+
+Full field-by-field contract: [`docs/JSON-CONTRACT.md`](docs/JSON-CONTRACT.md).
 
 ## Wiring the statusline into Claude Code
 

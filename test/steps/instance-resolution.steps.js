@@ -159,8 +159,8 @@ module.exports = function defineInstanceResolutionSteps(reg) {
     assert.ok(w.got.err.includes(`no live instance named '${name}'`), w.got.err);
   });
 
-  reg.define(/^the error says -i applies to economy, sidecar and cycle-view$/, (w) => {
-    assert.match(w.got.err, /-i applies to economy, sidecar, cycle-view/);
+  reg.define(/^the error says -i applies to economy, sidecar, cycle-view and subagents$/, (w) => {
+    assert.match(w.got.err, /-i applies to economy, sidecar, cycle-view, subagents/);
   });
 
   reg.define(/^the error says the ccr home is a container, not an instance$/, (w) => {

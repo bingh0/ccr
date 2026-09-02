@@ -91,3 +91,120 @@ A menu-bar / status-bar widget is **pure presentation**: poll
 — `binding.band` gives you the colour, `binding.minutesLeft` the headline, and
 `clear.worthwhile` / `clear.boughtMinutes` the clear hint. Keeping the single
 tested source of truth in JS is the whole point of the contract.
+
+---
+
+# `ccr subagents` — the roster contract
+
+**New at 0.7.** A second, *separate* contract in this file. It shares nothing
+with the economy model above — different command, different shape, its own
+stability story — and the economy contract's `schemaVersion` says nothing about
+it.
+
+`ccr subagents` emits **one JSON object** on stdout and exits 0. It is
+**read-only**: it derives the roster from Claude Code's own transcripts and
+writes nothing into the instance's state dir.
+
+```sh
+ccr subagents                  # the instance resolved from your cwd
+ccr subagents -i side-project  # a named live instance
+ccr subagents --all            # every live instance, rolled up
+ccr subagents -i side-project --debug   # plus the channels read
+```
+
+These are the **same facts the sidebar's subagent pane shows** — both doors
+render from one model and one display policy (`src/subagents.js`), so they
+cannot disagree. The single difference: the pane shows what its rows fit, this
+reports **every agent retirement has left standing**.
+
+## Stability
+
+- The **first property is always `instance`**, the name the resolution chain
+  landed on. That is how this door "heads with the name it resolved" without
+  putting a line in front of the object and breaking `| jq`.
+- New fields may be added. Consumers MUST ignore unknown fields.
+- `null` means *not known*, never zero. Claude Code omits a timestamp often
+  enough that every derived age can legitimately be `null`.
+
+## Shape
+
+```jsonc
+{
+  "instance": "side-project",   // resolved name; null when the instance is unnamed
+                                // (under --all, "slot 3" when it has no name)
+  "transcript": "/home/you/.claude/projects/-code-app/<sid>.jsonl",
+                                // null when no snapshot or no transcript yet —
+                                // which is NOT the same as "no subagents"
+  "stale": false,               // whole-transcript silence while agents are live
+  "staleForMs": 4200,           // how long since the newest upstream event, or null
+  "lastEventAt": "2026-09-01T12:00:00.000Z",  // ISO, or null
+  "live": 2,                    // agents surviving retirement, by state
+  "finished": 1,
+  "retired": 3,                 // agents the retirement clock dropped
+  "agents": [ /* see below */ ]
+}
+```
+
+### `agents[]`
+
+| Field | Type | Meaning |
+|---|---|---|
+| `id` | string | Claude Code's agent id, or `dispatch:<toolUseId>` before the id arrives |
+| `type` | string | the subagent type (`explore`, `general-purpose`, …) |
+| `task` | string | Claude's own dispatch **prompt**, head-first — not the description |
+| `state` | `"live"` \| `"done"` \| `"failed"` | a failure never reads as done |
+| `spawnedAt` | ISO \| null | when the dispatch was recorded |
+| `ageMs` | number \| null | now − `spawnedAt` |
+| `completedAt` | ISO \| null | the completion Claude Code stamped; null never retires |
+| `tokens` | number | `input + output + cache_creation` over the agent's own turns |
+| `words` | string \| null | its latest non-empty text block (thinking is not words) |
+| `wordsAgeMs` | number \| null | how old those words are |
+| `lastTool` | string \| null | its latest tool call, by name |
+| `lastToolArg` | string \| null | that call's summarised argument |
+| `toolAgeMs` | number \| null | how old that call is |
+| `parentId` | string \| null | the parent agent, for a nested spawn |
+| `depth` | number | 1 for an agent the session itself dispatched |
+| `failure` | string \| null | what Claude Code surfaced when it failed |
+
+### `--all`
+
+```jsonc
+{ "instances": [ { "instance": "alpha", /* …the single-instance object… */ }, … ] }
+```
+
+Every live instance, each entry labelled by its own name. Cross-instance
+aggregation is **CLI-only** by design — panes stay strictly own-session.
+
+### `--debug`
+
+Adds one array and changes nothing else:
+
+```jsonc
+"channels": [
+  { "name": "session",              "path": "…/<sid>.jsonl",   "lastEventAgeMs": 4200, "readable": true },
+  { "name": "agent-a4e4cc6b8ee1a633e",      "path": "…/subagents/agent-….jsonl",      "lastEventAgeMs": 1500, "readable": true },
+  { "name": "agent-a4e4cc6b8ee1a633e.meta", "path": "…/subagents/agent-….meta.json", "lastEventAgeMs": null, "readable": true }
+]
+```
+
+`lastEventAgeMs` is `null` for a metadata sidecar: it is a single JSON object
+carrying no timestamp, so its freshness is unknown rather than zero.
+
+## Exit codes
+
+| Code | When |
+|---|---|
+| 0 | a reading — including an empty roster, which is an answer, not an error |
+| 1 | the instance could not be resolved (`-i` named nothing live, several matched, none live) |
+| 2 | a usage error (`--all` together with `-i`) |
+
+A session that never fanned out exits **0** with `"agents": []` and a non-null
+`transcript`. An instance with no snapshot yet exits 0 with `"agents": []` and
+`"transcript": null`. Distinguish the two by that field, never by the exit code.
+
+## For script authors
+
+Poll it, don't reimplement it. Retirement, staleness and the live/finished split
+are policy, and the policy lives in one function that both doors call — a script
+that re-derives them from `completedAt` will drift from what the user's sidebar
+is showing them at that moment.

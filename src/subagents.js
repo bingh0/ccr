@@ -143,7 +143,13 @@ function parseTs(s) {
  */
 function clean(s) {
   if (s == null) return '';
-  const t = String(stripControl(s));
+  // Line breaks and tabs become ONE space before the strip. `stripControl`
+  // deletes them outright, which welds the words on either side together
+  // ("uncommitted.## Files changed", read off a real agent's final report in
+  // the adversarial review of 2026-09-02). A space keeps the words apart on the
+  // pane's one row and in the JSON alike; it is whitespace normalisation, not
+  // masking — every non-whitespace character still passes through verbatim.
+  const t = String(stripControl(String(s).replace(/[\r\n\t]+/g, ' ')));
   return t.length > TEXT_CAP ? t.slice(0, TEXT_CAP) : t;
 }
 

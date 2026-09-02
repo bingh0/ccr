@@ -46,6 +46,7 @@ const defineGitPaneSafetySteps = require('./git-pane-safety.steps');
 const defineSidecarHotkeysSteps = require('./sidecar-hotkeys.steps');
 const defineSubagentChannelsSteps = require('./subagent-channels.steps');
 const defineSubagentsViewSteps = require('./subagents-view.steps');
+const defineSubagentMirrorSteps = require('./subagent-mirror.steps');
 
 /**
  * Feature-file basename → its step definer. A feature with no entry here runs
@@ -85,4 +86,5 @@ module.exports = {
   'sidecar-hotkeys': defineSidecarHotkeysSteps,
   'subagent-channels': defineSubagentChannelsSteps,
   'subagents-view': defineSubagentsViewSteps,
+  'subagent-mirror': defineSubagentMirrorSteps,
 };

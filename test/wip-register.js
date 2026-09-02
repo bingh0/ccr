@@ -58,12 +58,8 @@ const WHOLE_FEATURE_WIP = [
   // section "The subagent observability views" in features/OUT-OF-SCOPE.md).
   // Post-0.5.0 feature work; no release coupling ruled, but same logic as the
   // git pane applies — agreed criteria are worth holding the build to, and
-  // agreed criteria are not a feature. Entries leave as their steps bind.
-  {
-    feature: 'subagent-mirror',
-    reason: 'ccr subagents does not exist yet; steps bind with the CLI command and its JSON output.',
-    ruledOn: '2026-08-23',
-  },
+  // agreed criteria are not a feature. All three have since bound and the
+  // trio holds no entry here.
   // 'subagent-channels' left the register on 2026-09-01, with the derivation
   // layer it pinned: src/subagents.js reads Claude Code's own records and
   // every scenario binds against a real projects tree — including the doctor
@@ -76,6 +72,18 @@ const WHOLE_FEATURE_WIP = [
   // scenarios the fence recorded as @security debt — escape sequences rendering
   // inert, and secrets rendering verbatim — carry the tag now that their steps
   // bind (test/security-tags.test.js).
+  // 'subagent-mirror' left the register on 2026-09-02, with `ccr subagents`
+  // itself: the machine door exists, and every scenario runs the REAL command
+  // through spawnSync against a sandbox of live instances holding real
+  // transcripts. The parity scenario renders the pane through composeFrame in
+  // the same world and compares the two doors fact for fact rather than either
+  // against a fixture. That closed the trio scoped on 2026-08-23.
+  //
+  // THE LIST NOW STANDS EMPTY, which is a state worth naming rather than a
+  // blank to skim past: no product surface currently carries acceptance
+  // criteria that have never executed, and scripts/release-gate.js therefore
+  // passes with no waiver. The next whole-feature entry is a deliberate act,
+  // not a leftover.
 ];
 
 /**

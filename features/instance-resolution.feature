@@ -5,8 +5,8 @@
 # The chain, ruled: CCR_STATE_DIR wins → else the live instance whose launch
 # directory contains the cwd (longest match) → else the single live one →
 # else list them and refuse. `-i <name>` selects from the LIVE SET — the same
-# set the final branch lists — and is honored by exactly three commands:
-# economy, sidecar, cycle-view. Every other command refuses it LOUDLY,
+# set the final branch lists — and is honored by exactly four commands:
+# economy, sidecar, cycle-view, subagents. Every other command refuses it LOUDLY,
 # because the option parser is global: a silently swallowed -i would let
 # "ccr resume -i side-project" look targeted while targeting nothing.
 # The safeguard replacing any account bound: every instance-targeted command
@@ -87,7 +87,7 @@ Feature: Finding the one you meant
   Scenario Outline: Commands that do not target an instance refuse -i
     When ccr <command> runs with -i "side-project"
     Then the command fails
-    And the error says -i applies to economy, sidecar and cycle-view
+    And the error says -i applies to economy, sidecar, cycle-view and subagents
 
     Examples:
       | command    |

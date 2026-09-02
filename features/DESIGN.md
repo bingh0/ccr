@@ -141,3 +141,17 @@ the same records.
   glance, and a second spelling of the same quantity on one screen is exactly
   the drift the shared helper exists to prevent. Sanctioned by the shape
   section's "presentation below the contract" note in the fence's debt list.
+- 2026-09-02 — the JSON door HEADS WITH THE RESOLVED NAME AS ITS FIRST
+  PROPERTY, not as a line above the object. The -i family's law is that every
+  instance-targeted command names what it resolved to — the safeguard against
+  reading the right panel about the wrong instance — and every other door obeys
+  it with a text heading. `ccr subagents` cannot: a heading line in front of an
+  object is a parse error to `jq` and to every other consumer, and this door
+  exists FOR consumers. So `"instance"` is emitted first, ahead of `"stale"` and
+  the roster, and the acceptance step asserts both that it is the object's first
+  key and that the raw bytes open with it. `--all` labels each entry the same
+  way, using `slot N` where an instance has no name, because an aggregate whose
+  entries cannot be told apart answers nothing. Sanctioned by
+  subagent-mirror.feature's header ruling ("`-i` family semantics inherited:
+  output heads with the resolved name") read with R12's door election, which
+  chose a CLI emitting JSON and therefore owes `| jq` a parseable stream.

@@ -300,4 +300,6 @@ read by the next.
   switch.
 - Never masks. Words render verbatim, secret-shaped or not (need N11, ruled
   with eyes open). Control characters *are* stripped at capture — that is
-  inert-rendering, not masking.
+  inert-rendering, not masking — and line breaks and tabs become one space
+  first, so a multi-line report reads as words rather than as words welded
+  together.

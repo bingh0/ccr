@@ -9,6 +9,7 @@
 //   ccr economy --json  emit the machine-readable economy model (see docs/JSON-CONTRACT.md)
 //   ccr statusline emit one-line status (wired via --settings at launch)
 //   ccr sidecar    run the live economy panel (used inside the tmux session)
+//   ccr subagents  emit this session's subagent roster as JSON (see docs/JSON-CONTRACT.md)
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -31,6 +32,7 @@ Usage:
   ccr resume       Recent sessions ranked by cost to resume (advisor)
   ccr statusline   Emit one-line status (wired automatically at launch)
   ccr sidecar      Run the live economy panel (used inside the tmux session)
+  ccr subagents    This session's subagent roster as JSON (read-only)
   ccr doctor       Check your local setup (node, tmux, CCS, capture status)
 
 Examples:
@@ -43,13 +45,17 @@ Options:
   -h, --help         Show this help
   -v, --version      Show version
       --name <name>  Name this instance (letters, digits, . _ -)
-  -i <name>          Target a live instance (economy, sidecar, cycle-view)
+  -i <name>          Target a live instance (economy, sidecar, cycle-view, subagents)
       --mary         Enable the mary interface
 
 Sidecar options:
       --view <n>  Open on a view: 0 economy, 1 git, 2 feed, 3 subagents,
                   4+ configured panes
-      --keys      Cycle views with F3 or Space, for terminals that bind no key`;
+      --keys      Cycle views with F3 or Space, for terminals that bind no key
+
+Subagents options:
+      --all       Roll up every live instance (refused together with -i)
+      --debug     Also name the channels read and how fresh each one is`;
 
 /**
  * @param {string[]} argv
@@ -73,6 +79,8 @@ function main(argv) {
         keys: { type: 'boolean' },
         view: { type: 'string' },
         mary: { type: 'boolean' },
+        all: { type: 'boolean' },
+        debug: { type: 'boolean' },
       },
     });
   } catch (err) {
@@ -100,15 +108,30 @@ function main(argv) {
   }
 
   const cmd = positionals[0];
-  // -i is a THREE-command flag: honored where a command must answer "which
+  // The commands that must answer "which live instance?" — the -i family. It
+  // grew to four with `ccr subagents`, whose whole job is to report on ONE
+  // instance's fan-out (features/subagent-mirror.feature, "An explicit -i
+  // answers headed by the name it resolved").
+  const I_FAMILY = ['economy', 'sidecar', 'cycle-view', 'subagents'];
+  const KNOWN_COMMANDS = ['economy', 'resume', 'statusline', 'sidecar', 'doctor', 'cycle-view', 'subagents', 'launch'];
+  const cname = cmd && KNOWN_COMMANDS.includes(cmd) ? cmd : 'launch';
+  // -i is a FOUR-command flag: honored where a command must answer "which
   // live instance?", refused LOUDLY everywhere else — the option parser is
   // global, so a silently swallowed -i would let `ccr resume -i x` look
   // targeted while targeting nothing (features/instance-resolution.feature).
   const iTarget = values.instance != null ? values.instance : null;
-  if (iTarget != null && !['economy', 'sidecar', 'cycle-view'].includes(cmd || '')) {
-    const known = ['economy', 'resume', 'statusline', 'sidecar', 'doctor', 'cycle-view', 'launch'];
-    const cname = cmd && known.includes(cmd) ? cmd : 'launch';
-    process.stderr.write(`ccr: -i applies to economy, sidecar, cycle-view — ${cname} does not target an instance\n`);
+  if (iTarget != null && !I_FAMILY.includes(cmd || '')) {
+    process.stderr.write(`ccr: -i applies to ${I_FAMILY.join(', ')} — ${cname} does not target an instance\n`);
+    return 2;
+  }
+  // --all and --debug belong to `ccr subagents` alone, and are refused
+  // elsewhere for exactly the reason -i is: parseArgs is global, so a flag no
+  // command reads is swallowed in silence, and `ccr resume --all` would look
+  // widened while widening nothing. (It errors today only because the option
+  // does not exist at all; declaring it must not buy that silence.)
+  const strayFlag = values.all ? '--all' : values.debug ? '--debug' : null;
+  if (strayFlag && cmd !== 'subagents') {
+    process.stderr.write(`ccr: ${strayFlag} applies to subagents — ${cname} does not take it\n`);
     return 2;
   }
   if (!cmd) return cmdLaunch(undefined, values.name);   // bare `ccr` → launch
@@ -117,6 +140,7 @@ function main(argv) {
     case 'resume': return cmdResume(positionals[1]);
     case 'statusline': return cmdStatusline();
     case 'sidecar': return cmdSidecar(values['state-dir'], !!values.hint, !!values['exit-on-end'], !!values.keys, view, iTarget);
+    case 'subagents': return cmdSubagents(iTarget, !!values.all, !!values.debug);
     case 'doctor': return require('../src/doctor').run();
     case 'cycle-view': return cmdCycleView(values['state-dir'], iTarget);
     case 'launch': return cmdLaunch(positionals[1], values.name);
@@ -287,6 +311,165 @@ function printAccountPanel() {
   }
   out.push(`history: ${sessions} session${sessions === 1 ? '' : 's'} retained`);
   process.stdout.write(out.join('\n') + '\n');
+  return 0;
+}
+
+/**
+ * The instant every age, staleness clock and retirement decision in one
+ * reading is measured from.
+ *
+ * TEST SEAM: `CCR_NOW` pins it, in epoch milliseconds. An acceptance scenario
+ * has to hold the pane and this command to ONE instant before it can compare
+ * them fact for fact (features/subagent-mirror.feature, "The reading matches
+ * the pane fact for fact"), and a subprocess cannot be handed a `now` any other
+ * way. Parsed STRICTLY — digits only, finite, positive — and ignored otherwise:
+ * a NaN clock would age every agent to null and read as a derivation bug rather
+ * than as a mistyped variable.
+ *
+ * @returns {number}
+ */
+function pinnedNow() {
+  const raw = process.env.CCR_NOW;
+  if (raw && /^\d{1,15}$/.test(raw)) {
+    const ms = Number(raw);
+    if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  return Date.now();
+}
+
+/**
+ * One instance's reading: the roster model derived from Claude Code's own
+ * transcripts, in the JSON shape docs/JSON-CONTRACT.md documents.
+ *
+ * The transcript path travels the SAME route the pane takes — the captured
+ * snapshot, through `currentTranscriptPath`, which is what confines it to
+ * `~/.claude/projects` — because a door that found the transcript some other
+ * way would be a second derivation path, and the parity scenario exists to stop
+ * exactly that.
+ *
+ * `slots: null` is the difference between the doors and the only one: the pane
+ * shows what its rows fit, this reports every agent retirement left standing.
+ * Retirement itself applies to both, which is what "Retired agents are absent
+ * from both doors alike" asks for.
+ *
+ * @param {string} stateDir
+ * @param {string|null} label   the name this reading is headed with
+ * @param {{ now: number, debug: boolean }} o
+ * @returns {Record<string, any>}
+ */
+function subagentReading(stateDir, label, o) {
+  const { readTextCapped } = require('../src/safe-read');
+  const { currentTranscriptPath } = require('../src/transcripts');
+  const { readRoster, rosterView } = require('../src/subagents');
+
+  /** @type {string|null} */
+  let tpath = null;
+  // Capped and regular-files-only, the rule every file ccr does not write is
+  // read under (src/safe-read.js): a fifo left at this path would otherwise
+  // block the command forever.
+  const raw = readTextCapped(path.join(stateDir, 'last-status.json'), MAX_SNAPSHOT_BYTES) || '';
+  if (raw.trim()) {
+    try { tpath = currentTranscriptPath(JSON.parse(raw)); } catch { /* unparseable snapshot */ }
+  }
+
+  const model = tpath ? readRoster(tpath, { now: o.now }) : null;
+  const view = model ? rosterView(model, { now: o.now, slots: null }) : null;
+  const iso = (/** @type {number|null} */ ms) => (ms == null ? null : new Date(ms).toISOString());
+
+  /** @type {Record<string, any>} */
+  const out = {
+    // FIRST, always. A JSON door heads with the name it resolved by making that
+    // the object's first property rather than by printing a line in front of it
+    // — a heading line would head straight into `jq`'s parse error.
+    instance: label,
+    // No snapshot and no transcript are not "no subagents": the first says ccr
+    // has nothing to read, the second says it read the session and found no
+    // agents. Both exit 0 with an empty roster, and this field is what tells
+    // them apart — the same distinction the pane draws as two different lines.
+    transcript: tpath,
+    stale: view ? view.stale : false,
+    staleForMs: view ? view.staleForMs : null,
+    lastEventAt: iso(view ? view.lastEventAt : null),
+    live: view ? view.live : 0,
+    finished: view ? view.finished : 0,
+    retired: view ? view.retired : 0,
+    agents: (view ? view.agents : []).map((a) => ({
+      id: a.id,
+      type: a.type,
+      task: a.task,
+      state: a.state,
+      spawnedAt: iso(a.spawnedAt),
+      ageMs: a.ageMs,
+      completedAt: iso(a.completedAt),
+      tokens: a.tokens,
+      words: a.words,
+      wordsAgeMs: a.wordsAgeMs,
+      lastTool: a.lastTool,
+      lastToolArg: a.lastToolArg,
+      toolAgeMs: a.toolAgeMs,
+      parentId: a.parentId,
+      depth: a.depth,
+      failure: a.failure,
+    })),
+  };
+  if (o.debug) {
+    // R34: the channels read, and each one's freshness — and nothing else
+    // changes. A metadata sidecar carries no timestamp of its own, so its age
+    // is null rather than an invented zero.
+    out.channels = (model ? model.channels : []).map((c) => ({
+      name: c.name,
+      path: c.path,
+      lastEventAgeMs: c.lastEventAt == null ? null : o.now - c.lastEventAt,
+      readable: c.readable,
+    }));
+  }
+  return out;
+}
+
+/**
+ * `ccr subagents [-i <name>] [--all] [--debug]` — the machine door onto the
+ * subagent roster (features/subagent-mirror.feature). ONE JSON object on
+ * stdout, pretty-printed the way `economy --json` is, and exit 0.
+ *
+ * READ-ONLY, structurally: everything below reads the snapshot and Claude
+ * Code's transcripts and holds the result in memory. Nothing is written into
+ * the instance's state dir — no view request, no heartbeat, no cache — because
+ * a reading that touched the instance would change the thing it reports on
+ * ("Reading never disturbs the instance").
+ *
+ * `--all` is CLI-ONLY by ruling (R40): panes stay strictly own-session, and
+ * cross-instance aggregation is a thing a script asks for, not a thing a
+ * sidebar shows. It is refused together with -i, which names exactly one.
+ *
+ * @param {string|null} target  -i name, resolved through the chain
+ * @param {boolean} all
+ * @param {boolean} debug
+ * @returns {number}
+ */
+function cmdSubagents(target, all, debug) {
+  if (all && target != null) {
+    // Both flags name a scope and the two disagree, so there is no reading that
+    // honours both. Name them BOTH: "invalid flags" would leave the user
+    // guessing which of the two to drop.
+    process.stderr.write(`ccr: --all reads every live instance and -i names one — drop --all or drop -i '${target}'\n`);
+    return 2;
+  }
+  const now = pinnedNow();
+  if (all) {
+    const { listLive } = require('../src/instance-resolve');
+    // Every live instance, each labelled by its own name — and an unnamed one
+    // labelled by the slot it occupies, because an aggregate whose entries
+    // cannot be told apart answers nothing.
+    const instances = listLive({ home: os.homedir() })
+      .map((i) => subagentReading(i.stateDir, i.name || `slot ${i.slot}`, { now, debug }));
+    process.stdout.write(JSON.stringify({ instances }, null, 2) + '\n');
+    return 0;
+  }
+  // The same chain every -i command resolves through, and the same refusal: an
+  // unresolvable target is loud and names the flag it came in on.
+  const res = require('../src/instance-resolve').resolveInstance({ target, command: 'subagents' });
+  if (!res.ok) { process.stderr.write(res.error + '\n'); return 1; }
+  process.stdout.write(JSON.stringify(subagentReading(res.stateDir, res.name, { now, debug }), null, 2) + '\n');
   return 0;
 }
 
