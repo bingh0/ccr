@@ -7,6 +7,41 @@ version is worth upgrading to, and where to read the rest.
 
 Dates are npm publish dates, because that is when a version reached anyone.
 
+## 0.6.2 — 2026-09-09
+
+The economy screen was wider than the sidebar it lives in. On a default-size
+Windows Terminal the sidebar is 39 columns and the wall row needed 54, so the
+last field on the row — the reset time — was the one cut off. A user read the
+result as "it doesn't show when it resets". It was there, past the edge. Not
+a Windows fault: tmux splits to the same 34%.
+
+- **The economy screen fits the pane.** The renderer now knows the pane width
+  and composes to it. A wall row that cannot hold its reset time moves it
+  under the row, sharing the "↑ the wall" line where there is one, instead of
+  losing it off the edge. The label column gives way before any meter, and
+  the hero, clear, context and footer lines shorten in steps rather than
+  being cut mid-word. The feed under the panel honours its width as the width
+  of every line it prints, so a long argument ends in an ellipsis rather than
+  in "rerun ru". A pane of unknown width renders exactly as before. Pinned by
+  scenarios at 40 and 80 columns, a 36-to-80 width sweep, and a frame composed
+  at 39 columns through the sidecar itself — the wiring the report came in
+  through, which turned out to be the one thing no test had held.
+- **The used% is a whole number again.** 0.5 added one decimal at or past 95%
+  used. It cost the row two columns for a digit that changed no decision, and
+  on a narrow pane those two columns were the start of the reset time. The
+  screen shows the same whole number `/usage` shows; the status line still
+  discloses a used% only near the wall, also whole.
+- **`ccr resume` reads Claude 5 sessions against a 1M window.** The window
+  guess for historical transcripts had no Claude 5 ids, so a Fable or Opus 5
+  session was sized at 200K: the context column read 107% and 262%, with a
+  "near /clear" warning, on sessions at 21% and 52%. Fable and Opus 5 now
+  guess 1M, from an observed 704K context and Claude Code's own "(1M
+  context)" label. Sonnet 5 stays on the fallback until a real session exists
+  to measure. No premium band was added: the measurement in
+  `docs/NOTE-premium-band-2026-09-09.md` says there is none to add.
+
+Cut from the 0.6.1 line so it ships while the subagent work continues.
+
 ## 0.6.1 — 2026-09-01
 
 0.6.0's headline clipboard fix was inert. It shipped correct in the source and
