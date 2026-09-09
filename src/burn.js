@@ -20,10 +20,29 @@ const WINDOW_TIERS = [200000, 400000, 512000, 1000000];
 const READ_WEIGHT = 0.1;
 const K_TAIL = 3000;
 
-/** @param {string} [model] */
+/**
+ * Best-effort window from a model id alone — the ONLY thing a historical
+ * transcript offers when it reports no context_window_size. It is an id table
+ * and nothing more: no premium knee, no pricing band, WINDOW_TIERS untouched.
+ * A miss here is not a wrong answer, only a weaker one — inferWindow falls
+ * through to the observed-tier lower bound.
+ *
+ * Claude 5 (2026-09): `claude-fable-5-1` was observed carrying a 704,101-token
+ * context, which no 200K/400K/512K tier can hold, and Claude Code's own status
+ * label reads "Opus 5 (1M context)". Without these two rows `ccr resume` sized
+ * every Claude 5 session at 200K and printed context percentages in the
+ * hundreds. Sonnet 5 is deliberately ABSENT: nothing on this machine has
+ * measured one, and a guessed 1M would be a fabricated fact rather than a
+ * missing one — the tier fallback is the honest answer until a session says
+ * otherwise. `opus-5` is matched as its own string so it can never catch
+ * `opus-4-6`/`-4-7`/`-4-8`, which are three different windows.
+ * @param {string} [model]
+ */
 function modelWindowGuess(model) {
   if (!model) return 0;
   const m = model.toLowerCase();
+  if (m.includes('fable')) return 1000000;
+  if (m.includes('opus-5')) return 1000000;
   if (m.includes('opus-4-8')) return 1000000;
   if (m.includes('opus-4-6') || m.includes('opus-4-7')) return 200000;
   if (m.includes('haiku')) return 200000;

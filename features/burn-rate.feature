@@ -78,16 +78,23 @@ Feature: Burn-rate and clear-ROI calculations across subscription plans
     Then the window used is 1000000 from the live status
     And it is not under-estimated to a 200K tier
 
+  # The Claude 5 rows carry a SMALL max observed context on purpose: 150000 puts
+  # the observed-tier fallback at 200000, so only the model-id table can satisfy
+  # a 1000000 claim. A row whose maxCtx already implies the answer would pass
+  # with the id unknown and certify nothing.
+
   Scenario Outline: Historical transcripts infer a window as a best-effort lower bound
     Given a transcript on model "<model>" whose max observed context is <maxCtx>
     When its window is inferred
     Then the inferred window is at least <window>
 
     Examples:
-      | model            | maxCtx | window  |
-      | claude-opus-4-7  | 150000 | 200000  |
-      | claude-opus-4-8  | 700000 | 1000000 |
-      | unknown-model    | 450000 | 512000  |
+      | model             | maxCtx | window  |
+      | claude-opus-4-7   | 150000 | 200000  |
+      | claude-opus-4-8   | 700000 | 1000000 |
+      | claude-fable-5-1  | 150000 | 1000000 |
+      | claude-opus-5     | 150000 | 1000000 |
+      | unknown-model     | 450000 | 512000  |
 
   # --- Smoothed estimator: steadier than the raw slope (chosen by backtest) ---
 
