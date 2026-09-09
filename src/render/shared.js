@@ -16,25 +16,12 @@ const flash = (/** @type {boolean} */ tick, /** @type {string} */ s) => (tick ? 
 
 const pctColor = (/** @type {number} */ p) => (p >= 75 ? red : p >= 60 ? yellow : green);
 
-// At/above this used%, surface one extra digit of Claude's own (fractional)
-// `used_percentage`. Near the wall the next tenth is a decision input; below it
-// it is noise. A decimal appearing IS the "you are in the zone" salience signal.
+// The critical zone: at/above this used%, the wall is close enough that the
+// figure is worth spending a beat of the status line on. It no longer means
+// "surface a decimal" — 0.6.2 withdrew that (the extra two columns cost the
+// reset time on a narrow pane); it means the zone in which the one-line status
+// summary earns a used% AT ALL. The economy screen always shows one.
 const CRIT_PCT = 95;
-
-/**
- * Used% display string. Below the critical zone: the whole number. In the zone
- * (and under 100): one TRUNCATED decimal — the same downward direction as the
- * integer floor, so `floor(shown)` still equals what `/usage` reports. We never
- * tick above Claude's own number, only out-resolve it. The +1e-9 guards float
- * representation: 98.7 * 10 is 986.9999… and would otherwise truncate to 98.6.
- * @param {number} pct raw fractional used_percentage
- * @returns {string}
- */
-function usedLabel(pct) {
-  if (pct < CRIT_PCT || pct >= 100) return String(Math.floor(pct));
-  const tenths = Math.floor(pct * 10 + 1e-9);
-  return `${Math.floor(tenths / 10)}.${tenths % 10}`;
-}
 
 function bar(/** @type {number} */ p, w = 10) {
   const f = Math.max(0, Math.min(w, Math.round((p / 100) * w)));
@@ -205,7 +192,33 @@ function ellipsize(s, cols) {
   return out + '…';
 }
 
+/**
+ * Choose the widest form of a line that still fits: the FIRST candidate whose
+ * visible width is within `cols`, the LAST one if none is, or the first when
+ * `cols` is unknown. Candidates are PLAIN strings (pre-colour) — colour is
+ * zero-width but not zero-length, so a budget must be measured before it.
+ *
+ * The house rule this encodes: nothing sanctioned is dropped silently by the
+ * terminal. `clampVisible` is the safety net and it cuts the RIGHTMOST field,
+ * which on the economy row was the reset time — the field a narrow sidebar user
+ * most needs. Deciding here, in the renderer, means the pane loses the field
+ * ccr chose to give up rather than the one the cut happened to land on.
+ *
+ * "Unknown" is any non-finite `cols` (undefined on a non-TTY). A known budget
+ * of zero or less is a real answer, not an unknown one: nothing fits, so the
+ * last (shortest) candidate stands.
+ *
+ * @param {number|undefined} cols
+ * @param {...string} candidates widest first, narrowest last
+ * @returns {string}
+ */
+function fit(cols, ...candidates) {
+  if (typeof cols !== 'number' || !Number.isFinite(cols)) return candidates[0];
+  for (const c of candidates) if (visibleWidth(c) <= cols) return c;
+  return candidates[candidates.length - 1];
+}
+
 module.exports = {
-  e, dim, bold, green, red, yellow, cyan, flash, pctColor, CRIT_PCT, usedLabel, bar, clampVisible, tok, fmtMins, fmtReset,
-  charWidth, visibleWidth, ellipsize,
+  e, dim, bold, green, red, yellow, cyan, flash, pctColor, CRIT_PCT, bar, clampVisible, tok, fmtMins, fmtReset,
+  charWidth, visibleWidth, ellipsize, fit,
 };

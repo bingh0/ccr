@@ -4,7 +4,7 @@
 // the sidecar. Pure function of an accumulated feed object (events + rolling
 // stats); the sidecar does the incremental transcript tail and hands it here.
 
-const { dim, bold, cyan, tok } = require('./shared');
+const { dim, bold, cyan, tok, ellipsize, visibleWidth } = require('./shared');
 
 /** @param {string} s @param {number} n */
 function trunc(s, n) {
@@ -23,6 +23,17 @@ function trunc(s, n) {
  * Render the feed block: a tool-count header, an optional rolling-stats line, and
  * the last N events. Returns '' when there's nothing to show (so the sidecar can
  * omit it cleanly).
+ *
+ * `width` is the widest any line here may be, in terminal COLUMNS — the pane
+ * the block is drawn in. Every line is cut to it with an ellipsis, by this
+ * renderer, so what reaches the frame's clamp already fits: the clamp cuts
+ * with no ellipsis at whatever column the pane ends, which on a 39-column
+ * sidebar left the argument column reading "rerun ru" (the same bug report
+ * as the economy row's missing reset — see features/economy.feature, "Narrow
+ * panes"). Before 0.6.2 `width` budgeted only the argument, and the fixed
+ * chrome around it (the margin, the arrow, the 8-column tool cell) put every
+ * line two to four columns past it; a tool name longer than its cell was not
+ * cut at all.
  * @param {Feed} feed
  * @param {{ max?: number, width?: number }} [opts]
  * @returns {string}
@@ -43,19 +54,27 @@ function renderFeed(feed, opts = {}) {
 
   const parts = counts.map((k) => `${k} ${tools[k]}`);
   if (feed.commands) parts.push(`cmd ${feed.commands}`);
-  const lines = ['  ' + bold('feed') + dim(parts.length ? '  ·  ' + trunc(parts.join(' · '), width - 8) : '  ·  (no tool calls yet)')];
+  // Chrome widths, so each budget below is `width` minus what is already on
+  // the line: "  feed  ·  " is 11, the stats indent is 9, "    ↳ " / "    ⌘ " are 6.
+  const lines = ['  ' + bold('feed') + dim(parts.length ? '  ·  ' + ellipsize(parts.join(' · '), width - 11) : '  ·  (no tool calls yet)')];
 
   const stat = [];
   if (nFiles) stat.push(`${nFiles} file${nFiles === 1 ? '' : 's'}`);
   if (out) stat.push(`${tok(out)} generated`);
-  if (stat.length) lines.push('  ' + dim('       ' + stat.join(' · ')));
+  if (stat.length) lines.push('  ' + dim('       ' + ellipsize(stat.join(' · '), width - 9)));
 
   for (const e of events.slice(-max)) {
     if (e.kind === 'cmd') {
-      lines.push('    ' + cyan('⌘ ' + trunc(e.tool, width - 4)));
+      lines.push('    ' + cyan('⌘ ' + ellipsize(e.tool, width - 6)));
     } else {
-      const arg = e.arg ? '  ' + dim(trunc(e.arg, width - 12)) : '';
-      lines.push('    ' + dim('↳ ') + e.tool.padEnd(8) + arg);
+      // The tool cell is 8 columns, or the name's own width when longer, cut to
+      // the line if it is longer than that. The argument gets whatever is left
+      // after the cell and its two-space gap, and is dropped rather than shown
+      // as a lone ellipsis when fewer than four columns remain.
+      const cell = ellipsize(e.tool, width - 6).padEnd(8);
+      const room = width - 6 - visibleWidth(cell) - 2;
+      const arg = e.arg && room >= 4 ? '  ' + dim(ellipsize(e.arg, room)) : '';
+      lines.push('    ' + dim('↳ ') + cell + arg);
     }
   }
   return lines.join('\n');

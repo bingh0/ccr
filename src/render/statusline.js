@@ -4,7 +4,7 @@
 // Plain text (no ANSI) so it renders cleanly wherever the status line appears.
 
 const { windowEstimate, binding } = require('../burn');
-const { fmtMins, usedLabel, CRIT_PCT } = require('./shared');
+const { fmtMins, CRIT_PCT } = require('./shared');
 
 /**
  * Deterministic middle ellipsis: the same input shortens the same way at
@@ -67,12 +67,14 @@ function renderStatusline(view, identity = {}) {
     if (b && b.minutesLeft != null) {
       const row = rows.find((r) => r.key === b.window);
       const label = row ? row.label : b.window;
-      // Progressive disclosure: the one-line summary earns the precise used%
-      // ONLY in the critical zone, and truncated, so floor() still matches
-      // /usage. Below the zone the line stays a single glanceable beat — the
+      // Progressive disclosure: the one-line summary earns a used% ONLY in the
+      // critical zone. Below it the line stays a single glanceable beat — the
       // time-to-limit already answers "am I near the wall?", and a percentage
       // that is always present stops being a signal when it starts to matter.
-      const pct = row && row.est.usedPct >= CRIT_PCT ? ` ${usedLabel(row.est.usedPct)}%` : '';
+      // The figure itself is the WHOLE number `/usage` shows, floored the same
+      // way: 0.6.2 withdrew the extra decimal everywhere (see CRIT_PCT), so
+      // this line and the economy screen can never read two digits apart.
+      const pct = row && row.est.usedPct >= CRIT_PCT ? ` ${Math.floor(row.est.usedPct)}%` : '';
       if (b.minutesLeft <= 30) {
         // "About to hit the wall" outranks orientation for the next thing the
         // user types: the warning jumps ahead of everything, identity included.

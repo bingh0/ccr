@@ -1,12 +1,92 @@
 // @ts-check
 'use strict';
 // Step definitions for features/economy.feature — drives src/render/economy.js.
+//
+// The pane width is the one thing about the world these steps pin, and only
+// when a scenario asks: `renderEconomy` is given `cols: w.cols`, which is
+// undefined unless "the pane is N columns wide" ran. Undefined is production's
+// own default (a non-TTY reports no width), so every older scenario keeps
+// exercising the natural-size screen and none of them was reshaped by 0.6.2.
+//
+// MUTATION LOG — 11 mutants, each applied to the PRODUCTION source, run, and
+// reverted. Recorded because a binding no world can make red is hollow. The
+// test each one turned red is named after the arrow; the width sweep it names
+// is test/economy-render.test.js's "fits every pane width from 36 to 80".
+// Nothing survived.
+//
+//   src/render/economy.js
+//     the row always ONE-LINE (stacked = false)   -> the width sweep, the narrow
+//                                                    pane, the very narrow pane
+//     TWO-LINE drops the reset instead of
+//       moving it under the row                   -> the narrow pane ("the 5h row
+//                                                    should still show resets
+//                                                    3h20m"), the very narrow
+//                                                    pane, the width sweep
+//     the labelW pane cap removed                 -> the very narrow pane, the
+//                                                    width sweep
+//     the decimal restored in the critical zone   -> "the used% column NEVER
+//                                                    widens", outline rows 95.04,
+//                                                    98.76, 99.99
+//     the ctx line always drawn in full           -> the width sweep, the narrow
+//                                                    pane, the very narrow pane
+//     the footer always drawn in full             -> the width sweep
+//     the clear line always keeps its
+//       "(195K → 14K)" suffix                     -> the width sweep, the narrow
+//                                                    pane, the very narrow pane
+//
+//   src/render/shared.js
+//     `fit` returns the first candidate always    -> its own unit test, the width
+//                                                    sweep, both narrow panes
+//
+//   src/render/statusline.js
+//     the decimal restored on the status line     -> "In the critical zone the
+//                                                    binding window earns its
+//                                                    used%"
+//
+//   src/burn.js
+//     the `fable` window mapping removed          -> burn-rate outline row
+//                                                    claude-fable-5-1
+//     the `opus-5` window mapping removed         -> burn-rate outline row
+//                                                    claude-opus-5
+//
+// REVIEW ROUND (adversarial, after the build) — 7 more mutants. One SURVIVED
+// on first run and exposed a hollow: dropping `cols` from composeFrame's
+// renderEconomy call left every test green, because nothing pinned the wiring
+// the bug report came through. test/sidecar.test.js now composes a frame at
+// 39 columns and demands both resets; that mutant is red. The review also
+// found two more lines the pane still cut — the "within limits" hero's gloss
+// and every feed row under the panel — and fitted them (features/feed.feature,
+// "Narrow panes"); their mutants are the last three.
+//
+//   src/render/economy.js
+//     headW measured on the coloured head
+//       (ANSI is zero-width, not zero-length)     -> "A wide pane keeps the
+//                                                    reset on the row", the
+//                                                    width sweep at cols >= 61
+//     textCols forgets the two-column indent      -> the width sweep
+//     the within-limits hero always keeps
+//       its gloss                                 -> "A narrow pane keeps the
+//                                                    verdict when the hero
+//                                                    line will not fit"
+//   src/render/shared.js
+//     `fit` uses < instead of <=                  -> the width sweep at exactly
+//                                                    cols == 61
+//   src/sidecar.js
+//     `cols` not passed to renderEconomy          -> sidecar "composes to the
+//                                                    pane width" (added in
+//                                                    review; survived before)
+//   src/render/feed.js
+//     the argument budget ignores the chrome
+//       (the pre-0.6.2 `width - 12`)              -> "Every feed line fits the
+//                                                    width the feed is given"
+//     the tool cell is never cut                  -> the same scenario
 
 const assert = require('node:assert');
 const path = require('node:path');
 const fs = require('node:fs');
 const { refuteWithControl } = require('./_absence');
 const { renderEconomy } = require('../../src/render/economy');
+const { visibleWidth } = require('../../src/render/shared');
 
 const strip = (/** @type {string} */ s) => s.replace(/\x1b\[[0-9;]*m/g, '');
 
@@ -38,7 +118,10 @@ function setWindow(w, key, label, usedPct, dur, windowMinutes) {
 
 function render(/** @type {Record<string, any>} */ w) {
   w.view = w.view || {};
-  w.raw = renderEconomy(w.view, { theme: w.theme || 'plain', ageMs: w.ageMs || 0 });
+  // `cols` is undefined unless a scenario said how wide the pane is — which is
+  // the production default too (a non-TTY reports no width), so every scenario
+  // that says nothing about a pane keeps exercising the natural-size screen.
+  w.raw = renderEconomy(w.view, { theme: w.theme || 'plain', ageMs: w.ageMs || 0, cols: w.cols });
   w.out = strip(w.raw);
   w.lines = w.out.split('\n');
   w.hero = w.lines[2] || '';                          // [0]=title [1]=blank [2]=hero
@@ -47,6 +130,47 @@ function render(/** @type {Record<string, any>} */ w) {
 /** find the bar row for a label (5h / weekly / ctx) */
 function meterRow(/** @type {Record<string, any>} */ w, /** @type {string} */ label) {
   return w.lines.find((/** @type {string} */ l) => /[▓░]/.test(l) && new RegExp('\\b' + label + '\\b').test(l)) || '';
+}
+
+// --- Narrow panes ------------------------------------------------------------
+// A wall row's label cell: the two-space margin, the dot, then everything up to
+// the time column, which always opens with "~" or an em dash. Parsed rather than
+// searched for, so a label can be identified even when the pane has shortened it.
+const LABEL_CELL = /^ {2}● (.*?) +[~—]/;
+
+/**
+ * Index of the wall row for a label. The cell is matched WHOLE, or truncated to
+ * its column ("weekly · Sonnet" → "weekly …" once the pane squeezes the label) —
+ * shortening the label is exactly what the narrow-pane scenarios sanction, and a
+ * matcher that only knew the whole name would report the row as missing.
+ */
+function wallRowIndex(/** @type {Record<string, any>} */ w, /** @type {string} */ label) {
+  const i = w.lines.findIndex((/** @type {string} */ l) => {
+    if (!/[▓░]/.test(l)) return false;
+    const m = LABEL_CELL.exec(l);
+    if (!m) return false;
+    const cell = m[1];
+    return cell === label || (cell.endsWith('…') && label.startsWith(cell.slice(0, -1)));
+  });
+  assert.ok(i >= 0, `no wall row for "${label}" in:\n${w.out}`);
+  return i;
+}
+
+/**
+ * The wall row for a label AND the lines it owns beneath it — the wall marker,
+ * a reset time that moved down off the row — stopping at the next meter row or
+ * at the blank line that closes the block. This is the whole of what the screen
+ * says about that window, which is what "the row still shows …" asks about.
+ */
+function rowBlock(/** @type {Record<string, any>} */ w, /** @type {string} */ label) {
+  const i = wallRowIndex(w, label);
+  const block = [w.lines[i]];
+  for (let j = i + 1; j < w.lines.length; j++) {
+    const l = w.lines[j];
+    if (l.trim() === '' || /[▓░]/.test(l)) break;
+    block.push(l);
+  }
+  return block.join('\n');
 }
 
 // Several refusals below are of one shape: a word that lives in ccr's MODEL
@@ -84,6 +208,7 @@ module.exports = function defineEconomySteps(reg) {
   reg.define(/^the 5h window's raw used_percentage is ([\d.]+), resetting in (.+)$/,
     (w, used, dur) => setWindow(w, '5h', '5h', String(used), String(dur), 300));
   reg.define(/^the snapshot was captured (\d+) minutes? ago$/, (w, min) => { w.ageMs = Number(min) * 60000; });
+  reg.define(/^the pane is (\d+) columns wide$/, (w, n) => { w.cols = Number(n); });
 
   // --- Action ---
   reg.define(/^the economy screen renders$/, render);
@@ -206,15 +331,42 @@ module.exports = function defineEconomySteps(reg) {
     const row = meterRow(w, '5h');
     assert.ok(row.includes(shown + '% used'), `5h row should read "${shown}% used" — got: ${row.trim()}`);
   });
-  reg.define(/^the whole-number part still matches Claude's \/usage floor of (\d+)$/, (w, floorStr) => {
-    const m = /(\d+(?:\.\d)?)% used/.exec(meterRow(w, '5h'));
-    assert.ok(m, 'a used% figure is present');
-    assert.strictEqual(Math.floor(Number(m[1])), Number(floorStr), 'floor(shown) must equal the /usage integer');
-  });
   reg.define(/^the used% figure is shown dimmed, not as a live value$/, (w) => {
     assert.match(w.raw, DIMMED_USED, 'used% should be dim-wrapped when the snapshot is stale');
   });
   reg.define(/^the used% figure is not dimmed$/, (w) => {
     assert.doesNotMatch(w.raw, DIMMED_USED, 'used% must not be dim-wrapped while the snapshot is fresh');
+  });
+
+  // --- Narrow panes ---
+  // Measured in COLUMNS, not characters: the screen's own budget arithmetic uses
+  // src/render/shared.js visibleWidth, and a step counting `length` would call a
+  // wide-glyph label that overflows the pane a pass.
+  reg.define(/^every line of the economy screen fits in (\d+) columns$/, (w, n) => {
+    const max = Number(n);
+    const over = w.lines
+      .map((/** @type {string} */ l, /** @type {number} */ i) => ({ i, l, width: visibleWidth(l) }))
+      .filter((/** @type {any} */ x) => x.width > max)
+      .map((/** @type {any} */ x) => `line ${x.i} is ${x.width} cols: ${JSON.stringify(x.l)}`);
+    assert.deepStrictEqual(over, [], `every line must fit ${max} columns`);
+  });
+  // "still shows" is about the WINDOW, not about one line: the reset may sit on
+  // the meter row or on the line below it, and both are the row saying it.
+  reg.define(/^the (5h|weekly) row still shows "([^"]+)"$/, (w, label, shown) => {
+    const block = rowBlock(w, String(label));
+    assert.ok(block.includes(String(shown)), `the ${label} row should still show "${shown}" — got:\n${block}`);
+  });
+  reg.define(/^the "([^"]+)" row still shows "([^"]+)"$/, (w, label, shown) => {
+    const block = rowBlock(w, String(label));
+    assert.ok(block.includes(String(shown)), `the "${label}" row should still show "${shown}" — got:\n${block}`);
+  });
+  reg.define(/^the hero line reads "([^"]+)"$/, (w, s) => {
+    assert.ok(w.hero.includes(String(s)), `the hero line should read "${s}" — got: ${JSON.stringify(w.hero)}`);
+  });
+  // The discriminating half: a pane wide enough must NOT have moved the reset
+  // down, so this one reads the meter line alone and demands it ends there.
+  reg.define(/^the 5h meter line itself ends with "([^"]+)"$/, (w, shown) => {
+    const row = w.lines[wallRowIndex(w, '5h')];
+    assert.ok(row.endsWith(String(shown)), `the 5h meter line should end with "${shown}" — got: ${JSON.stringify(row)}`);
   });
 };

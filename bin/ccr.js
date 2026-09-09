@@ -237,7 +237,11 @@ function cmdEconomy(json, target = null) {
     return 0;
   }
   const { renderEconomy } = require('../src/render/economy');
-  const panel = renderEconomy(normalizeStatus(state));
+  // A TTY has a width and the panel composes to it; a pipe or a file has none,
+  // so the panel renders at its natural size (process.stdout.columns is
+  // undefined there anyway, and a redirected panel should not be reflowed to
+  // whatever terminal happened to launch it).
+  const panel = renderEconomy(normalizeStatus(state), { cols: process.stdout.isTTY ? process.stdout.columns : undefined });
   process.stdout.write((heading ? heading + '\n' : '') + panel + '\n');
   return 0;
 }
@@ -275,7 +279,7 @@ function printAccountPanel() {
       }
       const { normalizeStatus } = require('../src/normalize');
       const { renderEconomy } = require('../src/render/economy');
-      out.push(renderEconomy(normalizeStatus({ rate_limits: rl })));
+      out.push(renderEconomy(normalizeStatus({ rate_limits: rl }), { cols: process.stdout.isTTY ? process.stdout.columns : undefined }));
     } catch { out.push('meters unreadable'); }
   } else {
     out.push('no burn history captured yet');

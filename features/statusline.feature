@@ -29,17 +29,20 @@ Feature: Status-line one-line summary
     When the status line renders
     Then the line contains the warning marker
 
-  # --- Critical-zone progressive disclosure: precise used% only near the wall ---
+  # --- Critical-zone progressive disclosure: a used% only near the wall ---
   # The line stays a single glanceable beat by default. Only when the binding
-  # window enters the critical zone does it earn the precise (truncated) used%,
-  # so floor(shown) still matches /usage. A percentage that is always there stops
-  # being a signal at the moment it starts to matter.
+  # window enters the critical zone does it earn a used% at all — a percentage
+  # that is always there stops being a signal at the moment it starts to matter.
+  # WHICH figure it shows is not a choice this line makes: it is the same floored
+  # whole number /usage and the economy screen show, so two ccr surfaces read
+  # side by side can never differ by a digit. (0.5 disclosed one extra decimal
+  # here; 0.6.2 withdrew it everywhere — see features/economy.feature.)
 
-  Scenario: In the critical zone the binding window earns its precise used%
+  Scenario: In the critical zone the binding window earns its used%
     Given a status view on model "Opus 4.8"
     And a 5h limit at a raw 98.76% used, resetting in 4h00m, burning 2.0%/min
     When the status line renders
-    Then the line shows the binding used% as "5h 98.7%"
+    Then the line shows the binding used% as "5h 98%"
     And the line contains no ANSI colour codes
 
   Scenario: Below the critical zone the status line stays lean

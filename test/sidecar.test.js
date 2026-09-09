@@ -12,6 +12,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { composeFrame, updateFeed, run, heartbeatTick, clearHeartbeat, sidecarAlive } = require('../src/sidecar.js');
+const { visibleWidth } = require('../src/render/shared');
 
 // A fully-injected harness for run() so the end-of-session sweep and the
 // heartbeat takeover are testable without real timers, process.exit, stdout
@@ -195,6 +196,28 @@ const SAMPLE = JSON.stringify({
     seven_day: { used_percentage: 40, resets_at: Math.floor(Date.now() / 1000) + 500000 },
   },
   cost: { total_cost_usd: 4.2 },
+});
+
+test('the economy view composes to the pane width: at 39 columns every line fits and both resets survive', () => {
+  // The wiring the bug report came through. renderEconomy fits the pane only
+  // if composeFrame TELLS it the width; leave `cols` out of that call and the
+  // panel renders 54 wide, clamp cuts the rightmost field with no ellipsis,
+  // and the reset time reads as a bare "reset" — every renderer test green.
+  const dir = freshStateDir();
+  try {
+    fs.writeFileSync(path.join(dir, 'last-status.json'), SAMPLE);
+    const frame = composeFrame(dir, { now: Date.now(), cols: 39 }).replace(/\x1b\[[0-9;]*m/g, '');
+    const lines = frame.split('\n');
+    const over = lines.filter((l) => visibleWidth(l) > 39);
+    assert.deepStrictEqual(over, [], `lines wider than the 39-column pane:\n${frame}`);
+    // Both windows still say when they reset — the whole point of the fix.
+    const resets = lines.filter((l) => /resets \d/.test(l));
+    assert.strictEqual(resets.length, 2, `expected two reset lines in:\n${frame}`);
+    // And not by clamp: a cut reset would read "reset" with no figure after it.
+    assert.ok(!lines.some((l) => /\breset$/.test(l)), `a reset was cut at the pane edge:\n${frame}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('sidecar waits before the first status tick (@AC3)', () => {

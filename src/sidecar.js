@@ -364,7 +364,11 @@ function composeFrame(stateDir, opts = {}) {
     // SAME account (see src/account-limits.js) before rendering — best-effort, and
     // strictly guarded so a different account is never mixed in.
     const reconciled = { ...state, rate_limits: freshenAccountLimits(state.rate_limits, stateDir, opts.home ? { home: opts.home } : {}) };
-    out = renderEconomy(normalizeStatus(reconciled), { tick: Math.floor(now / 1000) % 2 === 0, ageMs });
+    // `cols` is the pane, handed to the renderer rather than left to `clamp`
+    // below: clamping cuts the RIGHTMOST field of an over-wide row, which on
+    // this screen is the reset time — the one a 39-column sidebar most needs.
+    // Given the width, the renderer composes to it and clamp stays the net.
+    out = renderEconomy(normalizeStatus(reconciled), { tick: Math.floor(now / 1000) % 2 === 0, ageMs, cols });
     // ccr's own view is position 1 of the cycle, named only when the cycle is
     // long enough for the position to tell you something (see showPosition).
     if (showPosition) out = out.replace(/\n/, dim(`   ${positionAt(0)}`) + '\n');
@@ -376,12 +380,13 @@ function composeFrame(stateDir, opts = {}) {
     out = dim('ccr render error: ' + msg.slice(0, 120));
   }
   // Live tool/skills feed below the panel — best-effort; never break the panel.
-  // Its inner width tracks the pane so args truncate cleanly (the clamp below is
-  // the hard safety net regardless).
+  // Its width IS the pane's (renderFeed cuts every line to it, ellipsis and
+  // all), capped at 52 so a wide pane draws the feed exactly as it always has;
+  // the clamp below stays the hard safety net regardless.
   try {
     const tpath = currentTranscriptPath(state);
     if (tpath) {
-      const feedWidth = typeof cols === 'number' && cols > 0 ? Math.max(20, Math.min(48, cols - 2)) : 48;
+      const feedWidth = typeof cols === 'number' && cols > 0 ? Math.max(20, Math.min(52, cols)) : 52;
       const feedStr = renderFeed(updateFeed(tpath), { max: 6, width: feedWidth });
       if (feedStr) out += '\n\n' + feedStr;
     }

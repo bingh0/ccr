@@ -54,6 +54,49 @@ Feature: Economy screen readability and intuitiveness
     When the economy screen renders
     Then the 5h and weekly meter bars start in the same column
 
+  # --- Narrow panes: the screen fits the sidebar it is drawn in ---
+  # Reported from Windows Terminal: "ccr doesn't display how long before it
+  # resets — just the projected time and the bar + %". The reset was never
+  # missing. The sidebar is 34% of the terminal less one column — 39 at the
+  # 120-column default — while the wall row is 54 wide, and the frame clamps
+  # each line to the pane with no ellipsis. So the RIGHTMOST field went first,
+  # and the rightmost field is the reset time. Not a Windows fault: tmux splits
+  # to the same 34%.
+  #
+  # The rule: nothing the screen chose to show is dropped by the edge. Where a
+  # row cannot hold its reset time, the reset time moves UNDER the row; where
+  # the pane is narrower still, the label column narrows before any meter,
+  # figure or verdict is touched.
+
+  Scenario: A narrow pane moves the reset time under the row rather than off the edge
+    Given the pane is 40 columns wide
+    When the economy screen renders
+    Then every line of the economy screen fits in 40 columns
+    And the 5h row still shows "resets 3h20m"
+    And the weekly row still shows "resets 5d10h"
+    And the 5h and weekly meter bars start in the same column
+    And the clear line states how many more minutes clearing now would buy
+
+  Scenario: A wide pane keeps the reset time on the row itself
+    Given the pane is 80 columns wide
+    When the economy screen renders
+    Then the 5h meter line itself ends with "resets 3h20m"
+
+  Scenario: A narrow pane keeps the verdict when the hero line will not fit
+    Given the 5h window is 10% used and resets in 1h00m
+    And the weekly window is 5% used and resets in 2d
+    And the pane is 40 columns wide
+    When the economy screen renders
+    Then every line of the economy screen fits in 40 columns
+    And the hero line reads "within limits"
+
+  Scenario: A very narrow pane shortens the label column before anything else
+    Given a Sonnet-only weekly bucket is 40% used and resets in 2d
+    And the pane is 40 columns wide
+    When the economy screen renders
+    Then every line of the economy screen fits in 40 columns
+    And the "weekly · Sonnet" row still shows "resets 2d"
+
   # --- Used vs remaining are labelled (R3) ---
 
   Scenario Outline: Percentage meters are labelled as "used"
@@ -104,24 +147,26 @@ Feature: Economy screen readability and intuitiveness
     When the economy screen renders
     Then the screen uses the phrase "bad moon rising"
 
-  # --- Critical-zone precision: full-accuracy used% near the wall ---
-  # Everyone is used to a whole-number readout. Near the limit the next tenth is
-  # a decision input rather than noise, so the screen surfaces one more digit of
-  # Claude's own fractional used_percentage — TRUNCATED, so floor(shown) never
-  # exceeds what /usage reports. A decimal appearing is itself the salience cue.
+  # --- One used%, always the whole number Claude's own /usage shows ---
+  # 0.5 surfaced an extra truncated decimal inside the critical zone, on the
+  # argument that near the wall the next tenth is a decision input. Withdrawn in
+  # 0.6.2 (owner ruling): the decimal widened the whole used% column by two
+  # columns, and two columns is exactly what a 39-column sidebar has to give up.
+  # What it gave up was the reset time at the row's right edge — so the price of
+  # the tenth was the answer to "how long until this clears?". The figure is now
+  # always the same floored whole number /usage reports, at every reading.
 
-  Scenario Outline: Past the critical threshold the used% gains one truncated decimal
+  Scenario Outline: The used% is the whole number, never a decimal
     Given the 5h window's raw used_percentage is <pct>, resetting in 2h00m
     When the economy screen renders
     Then the 5h meter reads "<shown>% used"
-    And the whole-number part still matches Claude's /usage floor of <floor>
 
     Examples:
-      | pct   | shown | floor |
-      | 92.40 | 92    | 92    |
-      | 95.04 | 95.0  | 95    |
-      | 98.76 | 98.7  | 98    |
-      | 99.99 | 99.9  | 99    |
+      | pct   | shown |
+      | 92.40 | 92    |
+      | 95.04 | 95    |
+      | 98.76 | 98    |
+      | 99.99 | 99    |
 
   # --- Freshness: a figure that stopped moving must stop claiming to be live ---
   # The snapshot only refreshes per chat round, so a precise figure can sit frozen

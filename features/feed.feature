@@ -40,6 +40,31 @@ Feature: Live tool/skills feed
     Then the feed shows "3 files"
     And the feed shows "53K generated"
 
+  # --- Narrow panes: every feed line fits the width it is given ---
+  # The same bug report as the economy row's missing reset (features/economy.feature,
+  # "Narrow panes"): the frame clamps to the pane with no ellipsis, so a feed line
+  # that overran its width read "Fix console encoding and rerun ru". The width the
+  # feed is given is the pane, in columns, and no line may exceed it.
+
+  Scenario: Every feed line fits the width the feed is given
+    Given a feed
+    And a tool event "Bash" with arg "Fix console encoding and rerun the whole ruler regression"
+    And a tool event "mcp__treecontext__treecontext_insert" with arg "content"
+    And a command event "/code-review-ultra-with-a-very-long-name"
+    And the tool counts are Bash 36, Edit 12, Read 12
+    And the rolling stats are 18 files and 210000 output tokens
+    When the feed renders at a width of 39
+    Then every feed line fits in 39 columns
+    And the feed shows "Bash" with a shortened argument ending in "…"
+    And the feed shows "mcp__treecontext__treecontext_insert" cut short with "…"
+
+  Scenario: A wide pane leaves a short argument whole
+    Given a feed
+    And a tool event "Bash" with arg "run tests"
+    When the feed renders at a width of 80
+    Then the feed shows "Bash" with "run tests"
+    And no feed line ends with "…"
+
   Scenario: An empty feed renders nothing
     Given a feed
     When the feed renders
