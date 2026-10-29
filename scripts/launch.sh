@@ -194,8 +194,21 @@ fi
 # the helper's own mktemp path inside tmux SINGLE quotes, where tmux performs no
 # escape processing at all. If that path could itself contain a quote we bind
 # nothing rather than emit a line we cannot reason about.
-CYCLE_SH="$(mktemp "${TMPDIR:-/tmp}/ccr-cycle.XXXXXX")"
-trap 'rm -f "$RUN_CONF" "$CYCLE_SH"' EXIT
+#
+# The helper lives in the instance's STATE DIR, not in $TMPDIR, and is NOT in
+# the EXIT trap. The binding is held by the tmux SERVER, which outlives this
+# launcher by design: detach-then-attach, or a boot wrapper that kills the
+# server this script was started under, ends the launcher while the key still
+# names the file. A trap-deleted /tmp helper then made F3 print
+# "'/tmp/ccr-cycle.XXXXXX' returned 127" on every press (reproduced 3/3,
+# 2026-09-13; reported again under mosh 2026-10-28). The state dir lasts as
+# long as the instance, is owner-only (umask 077 above), and is rewritten on
+# every launch; rm -f first turns a planted FIFO/symlink into a plain create,
+# the same guard launch-cwd uses. The leaked /tmp/ccr-cycle.* files from
+# servers whose launcher never ran its trap were the mirror symptom; this
+# location ends both.
+CYCLE_SH="$STATE/cycle-view.sh"
+rm -f "$CYCLE_SH" 2>/dev/null || true
 {
   printf '#!/bin/sh\n'
   printf "exec '%s' '%s' cycle-view --state-dir '%s'\n" \
@@ -203,7 +216,7 @@ trap 'rm -f "$RUN_CONF" "$CYCLE_SH"' EXIT
 } > "$CYCLE_SH"
 chmod 700 "$CYCLE_SH"
 case "$CYCLE_SH" in
-  *\'*) echo "ccr: TMPDIR contains a quote — F3 (cycle view) not bound" >&2 ;;
+  *\'*) echo "ccr: the state dir path contains a quote — F3 (cycle view) not bound" >&2 ;;
   *) printf "bind-key -n F3 run-shell '%s'\n" "$CYCLE_SH" >> "$RUN_CONF" ;;
 esac
 

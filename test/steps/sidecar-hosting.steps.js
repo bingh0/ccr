@@ -131,6 +131,25 @@ module.exports = function defineSidecarHostingSteps(reg) {
       assert.ok(helper[0].includes(`sq "$${v}"`), `${v} is single-quote-escaped before interpolation`);
     }
   });
+  reg.define(/^the helper is written inside this profile's state dir$/, (w) => {
+    assert.match(w.launchSh, /^CYCLE_SH="\$STATE\/[^"/]+"$/m,
+      'the helper path is a fixed name directly under $STATE');
+    refuteWithControl(/CYCLE_SH="\$\(mktemp/, w.launchSh,
+      'CYCLE_SH="$(mktemp "${TMPDIR:-/tmp}/ccr-cycle.XXXXXX")"',
+      'the helper must not be a mktemp file: $TMPDIR is shared with nothing that owns the instance');
+    // rm -f before the create: a planted FIFO or symlink at the fixed path
+    // becomes a plain file, the same guard launch-cwd carries.
+    assert.match(w.launchSh, /rm -f "\$CYCLE_SH"[^\n]*\n\{\s*\n\s*printf '#!\/bin\/sh/,
+      'the helper path is cleared immediately before it is written');
+  });
+  reg.define(/^the launcher's exit trap leaves the helper in place$/, (w) => {
+    const traps = w.launchSh.match(/^trap .*EXIT$/gm) || [];
+    assert.ok(traps.length > 0, 'the launcher registers an EXIT trap (the control for this refusal)');
+    for (const t of traps) {
+      refuteWithControl(/CYCLE_SH/, t, String.raw`trap 'rm -f "$RUN_CONF" "$CYCLE_SH"' EXIT`,
+        'no EXIT trap may remove the helper: the tmux server outlives the launcher');
+    }
+  });
   reg.define(/^the sidecar reads no keystroke of its own$/, () => {
     // The structural invariant the whole design exists to preserve; enforced
     // across the module graph by test/sidecar-capabilities.test.js.

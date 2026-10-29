@@ -68,6 +68,17 @@ Feature: Live sidecar hosting
     Then the key runs ccr's own cycle-view command against this profile's state dir
     And the sidecar reads no keystroke of its own
 
+  Scenario: The view-cycle helper outlives the launcher that wrote it
+    # The binding belongs to the tmux SERVER, which lives on after launch.sh
+    # exits (detach-then-attach; a boot wrapper killing the launcher's own
+    # server). A helper written to $TMPDIR and removed by the launcher's EXIT
+    # trap left F3 printing "'/tmp/ccr-cycle.XXXXXX' returned 127" on every
+    # press (reproduced 2026-09-13, reported again under mosh 2026-10-28).
+    Given the tmux launcher script scripts/launch.sh
+    When it binds the view-cycle key
+    Then the helper is written inside this profile's state dir
+    And the launcher's exit trap leaves the helper in place
+
   @security
   Scenario: Cycling holds no capability beyond changing which pane is shown
     # The first implementation read the sidecar's pid from its heartbeat and
