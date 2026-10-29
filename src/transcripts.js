@@ -74,15 +74,26 @@ const CMD_SCAN_MAX = 64 * 1024; // only scan a bounded prefix for the tag
 
 /**
  * Parse transcript lines into events, rolling stats, and session metadata.
+ *
+ * TOKENS ARE COUNTED ONCE PER ASSISTANT MESSAGE, not once per record — see the
+ * usage branch below. A caller that parses one transcript in SEVERAL batches
+ * (the sidecar's incremental tail) must hand back the message it was left in
+ * the middle of, through `priorMsgId`/`priorMsgTokens`, or a message split
+ * across two batches is counted twice. When it does, the returned
+ * `stats.tokens` is a DELTA to add to the running totals and may be negative
+ * for the carried message; `stats.lastMsgId`/`stats.lastMsgTokens` are what to
+ * carry into the next call.
+ *
  * @param {string | string[]} input  raw JSONL text or an array of raw lines
+ * @param {{ priorMsgId?: string|null, priorMsgTokens?: { input: number, output: number, cacheRead: number, cacheCreate: number }|null }} [opts]
  * @returns {{
  *   meta: { sessionId: string|null, cwd: string|null, gitBranch: string|null, version: string|null, startTs: number|null, lastTs: number|null },
  *   events: { ts: number|null, kind: 'tool'|'cmd', tool: string, arg: string }[],
  *   title: string|null, lastPrompt: string|null,
- *   stats: { tools: Record<string, number>, commands: number, tokens: { input: number, output: number, cacheRead: number, cacheCreate: number }, weighted: number, files: string[], models: string[], userPrompts: number, assistantTurns: number, lastTurn: { input: number, output: number, cacheRead: number, cacheCreate: number }|null, lastModel: string|null }
+ *   stats: { tools: Record<string, number>, commands: number, tokens: { input: number, output: number, cacheRead: number, cacheCreate: number }, weighted: number, files: string[], models: string[], userPrompts: number, assistantTurns: number, lastTurn: { input: number, output: number, cacheRead: number, cacheCreate: number }|null, lastModel: string|null, lastMsgId: string|null, lastMsgTokens: { input: number, output: number, cacheRead: number, cacheCreate: number } }
  * }}
  */
-function parseEvents(input) {
+function parseEvents(input, opts = {}) {
   const lines = Array.isArray(input) ? input : String(input).split('\n');
   const meta = { sessionId: /** @type {string|null} */(null), cwd: /** @type {string|null} */(null), gitBranch: /** @type {string|null} */(null), version: /** @type {string|null} */(null), startTs: /** @type {number|null} */(null), lastTs: /** @type {number|null} */(null) };
   /** @type {{ ts: number|null, kind: 'tool'|'cmd', tool: string, arg: string }[]} */
@@ -102,6 +113,14 @@ function parseEvents(input) {
   // input side is ~the context size), as opposed to the cumulative totals.
   let lastTurn = /** @type {{ input: number, output: number, cacheRead: number, cacheCreate: number }|null} */ (null);
   let lastModel = /** @type {string|null} */ (null);
+  // The message whose usage has already been counted into `tokens`, and by how
+  // much — the state that makes the per-message rule below work across a split
+  // BATCH as well as across a split message. Seeded from the caller so the
+  // sidecar's tail can hand back the message its previous tick ended inside.
+  let lastMsgId = opts.priorMsgId != null && opts.priorMsgId !== '' ? String(opts.priorMsgId) : null;
+  let lastMsgTokens = opts.priorMsgTokens
+    ? { input: opts.priorMsgTokens.input || 0, output: opts.priorMsgTokens.output || 0, cacheRead: opts.priorMsgTokens.cacheRead || 0, cacheCreate: opts.priorMsgTokens.cacheCreate || 0 }
+    : { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 };
 
   for (const ln of lines) {
     if (!ln || !ln.trim()) continue;
@@ -148,10 +167,36 @@ function parseEvents(input) {
       const u = msg.usage;
       if (u) {
         const turn = { input: u.input_tokens || 0, output: u.output_tokens || 0, cacheRead: u.cache_read_input_tokens || 0, cacheCreate: u.cache_creation_input_tokens || 0 };
+        // ONE assistant message is split across SEVERAL transcript records —
+        // one per content block — each repeating the SAME `usage` object, so
+        // summing per record inflates every multi-block turn (verified on
+        // 2.1.252: 447 usage-bearing records for 208 distinct message ids in
+        // one real session, 133 of those ids spanning more than one record,
+        // and no id whose records disagreed about their usage). Records of a
+        // message are contiguous, so remembering the last message id is enough
+        // to REPLACE its contribution rather than add to it — the rule
+        // src/subagents.js's `assistant()` already follows for an agent's own
+        // tokens, applied here to the feed. Owner ruling, 2026-09-02.
+        //
+        // A record with NO `message.id` keeps the old behaviour and counts on
+        // its own: without an id there is nothing to say two records are the
+        // same message, and dropping such a record would under-count rather
+        // than merely mis-attribute.
+        const mid = typeof msg.id === 'string' && msg.id ? stripControl(msg.id) : null;
+        if (mid && mid === lastMsgId) {
+          tokens.input -= lastMsgTokens.input;
+          tokens.output -= lastMsgTokens.output;
+          tokens.cacheRead -= lastMsgTokens.cacheRead;
+          tokens.cacheCreate -= lastMsgTokens.cacheCreate;
+        }
         tokens.input += turn.input;
         tokens.output += turn.output;
         tokens.cacheRead += turn.cacheRead;
         tokens.cacheCreate += turn.cacheCreate;
+        lastMsgId = mid;
+        lastMsgTokens = mid ? turn : { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 };
+        // The freshest turn is the MESSAGE's usage, counted once — the same
+        // object every record of that message repeats, never their sum.
         lastTurn = turn;
       }
       const c = msg.content;
@@ -173,7 +218,7 @@ function parseEvents(input) {
 
   return {
     meta, events, title, lastPrompt,
-    stats: { tools, commands, tokens, weighted, files: [...files], models: [...models], userPrompts, assistantTurns, lastTurn, lastModel },
+    stats: { tools, commands, tokens, weighted, files: [...files], models: [...models], userPrompts, assistantTurns, lastTurn, lastModel, lastMsgId, lastMsgTokens },
   };
 }
 

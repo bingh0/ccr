@@ -29,7 +29,9 @@ Usage:
   ccr [profile]    Launch Claude (or a CCS profile) with the live economy sidebar
   ccr economy      Print the economy panel from the latest captured status
   ccr economy --json   Emit the machine-readable economy model (stable contract)
-  ccr resume       Recent sessions ranked by cost to resume (advisor)
+  ccr resume [all] Recent sessions ranked by cost to resume (advisor).
+                   Default scope is this project; the positional \`all\` widens
+                   it to every project. (\`--all\` is a subagents flag, not this.)
   ccr statusline   Emit one-line status (wired automatically at launch)
   ccr sidecar      Run the live economy panel (used inside the tmux session)
   ccr subagents    This session's subagent roster as JSON (read-only)
@@ -475,13 +477,22 @@ function cmdSubagents(target, all, debug) {
 
 /**
  * `ccr resume [all]` — advisor: recent sessions ranked by cost to resume. Default
- * scope is the current project; `all` widens to every project. Read-only; you pick
- * with `claude --resume`.
+ * scope is the current project; the POSITIONAL `all` widens it to every project.
+ * Read-only; you pick with `claude --resume`.
+ *
+ * THE WIDENER IS `all`, NOT `--all`. This function used to accept both, which
+ * was dead code twice over: `--all` never reaches here (parseArgs consumes it
+ * as an option, so it is never a positional), and since `ccr subagents` landed
+ * it is refused LOUDLY in main() as a flag no other command reads. Leaving the
+ * branch in place suggested a spelling the CLI rejects. Owner ruling
+ * 2026-09-02: "be as correct as possible, and update documentation, rather
+ * than supporting the old behavior" — the refusal stays, the code stops
+ * hinting at the flag, and the positional is documented in HELP and the README.
  * @param {string | undefined} arg
  * @returns {number}
  */
 function cmdResume(arg) {
-  const scope = (arg === 'all' || arg === '--all') ? 'all' : 'cwd';
+  const scope = arg === 'all' ? 'all' : 'cwd';
   const { gather } = require('../src/resume');
   const { renderResume } = require('../src/render/resume');
   process.stdout.write(renderResume(gather({ scope, cwd: process.cwd() }), { scope }) + '\n');

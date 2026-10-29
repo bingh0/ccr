@@ -155,3 +155,35 @@ the same records.
   subagent-mirror.feature's header ruling ("`-i` family semantics inherited:
   output heads with the resolved name") read with R12's door election, which
   chose a CLI emitting JSON and therefore owes `| jq` a parseable stream.
+- 2026-09-02 — THE TASK COLUMN IS THE DISPATCH `description`, not the prompt.
+  R10 said "Claude's own dispatch words" and the build read `input.prompt`;
+  against real sessions that is the wrong half of the dispatch, because Claude
+  opens every prompt the same way ("You are the builder for batch A…") and the
+  column showed one identical string down the whole roster. The description
+  ("Fix installer.ts review findings") is equally Claude's own and is written
+  to be glanceable, which is the column's entire job. The ladder is
+  description → the metadata description (a skill-driven agent's stand-in for
+  the dispatch it never had) → the prompt head-first (R19 unchanged) → the
+  agent's own opening prompt → nothing, leaving the type alone (R18 unchanged).
+  Sanctioned by the owner's amendment of R10, 2026-09-02, recorded in the
+  fence's "Sanctioned changes" with the three scenarios it rewords.
+- 2026-09-02 — FEED TOKENS ARE COUNTED ONCE PER ASSISTANT MESSAGE. Claude Code
+  writes one assistant message as one record PER CONTENT BLOCK, each repeating
+  the same `usage`, so `parseEvents` summing per record inflated `stats.tokens`,
+  `weighted` and every figure drawn from them on any multi-block turn (measured
+  on a real 1285-record session: 87.0M token-equivalents before, 41.6M after).
+  Records of a message are contiguous, so the last message id is remembered and
+  its contribution REPLACED rather than added — the rule src/subagents.js
+  already used for an agent's own tokens. The sidecar's incremental tail carries
+  that message id across ticks in `feedState`, which makes the batch a DELTA
+  that may be negative; a record with no `message.id` still counts on its own,
+  since without an id there is nothing to say two records are one message.
+  Sanctioned by the owner's ruling of 2026-09-02.
+- 2026-09-02 — `ccr resume` WIDENS ON THE POSITIONAL `all`, and `--all` is
+  refused. `cmdResume` accepted both spellings, but `--all` is a globally
+  declared option that only `ccr subagents` reads, so it never arrived as a
+  positional and is refused loudly in `main()` — the branch was dead code that
+  advertised a spelling the CLI rejects. Removed rather than supported, with
+  HELP and the README stating the positional instead. Sanctioned by the owner's
+  ruling of 2026-09-02: "be as correct as possible, and update documentation,
+  rather than supporting the old behavior."

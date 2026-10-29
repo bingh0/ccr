@@ -189,10 +189,13 @@ function headerLine(view, width, position) {
  * The head row of one block: state glyph, type, Claude's own dispatch words,
  * age and tokens — on ONE row, always (R19).
  *
- * The task is the dispatch PROMPT, cut HEAD-FIRST (R10/R18/R19): the head of a
- * prompt says what the agent was sent to do, and a 2000-character brief that
+ * The task is whatever src/subagents.js composed from the dispatch — its
+ * DESCRIPTION first, and its prompt when there is no description (R10 as
+ * amended by the owner on 2026-09-02, R18/R19 unchanged). This file does not
+ * choose between them; it only cuts what it is given HEAD-FIRST, because the
+ * head says what the agent was sent to do and a 2000-character brief that
  * wrapped would cost the pane four rows and the redraw its cursor-home
- * invariant. An empty prompt leaves the type alone carrying the row (R18) —
+ * invariant. An empty task leaves the type alone carrying the row (R18) —
  * there is nothing to shorten, so nothing pretends there is.
  *
  * The type is capped at half the free columns so a long type name

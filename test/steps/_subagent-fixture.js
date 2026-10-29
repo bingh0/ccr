@@ -88,6 +88,12 @@ function buildSession(projectsRoot, opts = {}) {
      * DISPATCH — an `Agent` (or older `Task`) tool_use inside an assistant
      * record. `into` places it inside another agent's file, which is where a
      * NESTED dispatch really lives.
+     *
+     * `description` and `prompt` both DEFAULT rather than being required, and
+     * both take an explicit `''` to mean "upstream wrote none" — the case the
+     * owner's amended R10 (2026-09-02) needs, since the task column falls back
+     * from the description to the prompt and then to the type alone. `== null`
+     * rather than `||` is what makes an empty string reach the record.
      * @param {{ toolUseId: string, prompt?: string, description?: string,
      *   subagentType?: string|null, model?: string, at?: number|null,
      *   tool?: 'Agent'|'Task', into?: string|null }} o
@@ -95,7 +101,7 @@ function buildSession(projectsRoot, opts = {}) {
     dispatch(o) {
       /** @type {any} */
       const input = {
-        description: o.description || 'do the thing',
+        description: o.description == null ? 'do the thing' : o.description,
         prompt: o.prompt == null ? 'Map the auth flow before touching tests' : o.prompt,
         run_in_background: true,
       };
@@ -147,7 +153,7 @@ function buildSession(projectsRoot, opts = {}) {
           isAsync: true,
           status: 'async_launched',
           agentId: o.agentId,
-          description: o.description || 'do the thing',
+          description: o.description == null ? 'do the thing' : o.description,
           resolvedModel: 'opus',
           prompt: 'Map the auth flow before touching tests',
           outputFile,
@@ -303,7 +309,7 @@ function buildSession(projectsRoot, opts = {}) {
       /** @type {any} */
       const m = {
         agentType: o.agentType || 'general-purpose',
-        description: o.description || 'do the thing',
+        description: o.description == null ? 'do the thing' : o.description,
       };
       if (o.toolUseId) m.toolUseId = o.toolUseId;
       if (o.name) m.name = o.name;

@@ -61,6 +61,13 @@ Feature: Reading Claude Code session transcripts
     Then the input token total is 150
     And the output token total is 225
 
+  Scenario: One message split across several records is counted once
+    Given a transcript
+    And an assistant message split across 3 records each repeating 100 input and 200 output tokens
+    When the transcript is parsed
+    Then the input token total is 100
+    And the output token total is 200
+
   # --- Robustness ---
 
   Scenario: Malformed lines are skipped, not fatal

@@ -57,7 +57,8 @@ roster (dispatches live in the session transcript) and loses only the
 |---|---|
 | `id` | `dispatchId`, and the key every completion is matched on |
 | `input.subagent_type` | `type` (absent → `general-purpose`, as upstream defaults it) |
-| `input.prompt` | `task` — the task column is Claude's own dispatch words (R10/R18/R19). `description` is **not** used |
+| `input.description` | `task` — the task column is Claude's own dispatch words (R10, **amended 2026-09-02**: the description, not the prompt) |
+| `input.prompt` | `task`, when the dispatch carries no description — head-first (R19) |
 | record `timestamp` | `spawnedAt` |
 | the channel it was found in | `parentId`, when that channel is an agent file |
 
@@ -172,15 +173,31 @@ and `attachment` records (skipped).
 | newest **non-empty `text`** block | `words`, `wordsAt` |
 | newest `tool_use` block | `lastTool` (name), `lastToolArg` (`summarizeArg`), `lastToolAt` |
 | `message.usage` | `tokens` |
-| first record's string content | `task`, when there is no dispatch to take it from |
+| first record's string content | `task`, when neither a dispatch nor the metadata offers a description |
 
 **A `thinking` block is not words.** It is the agent talking to itself, and
 quoting it as its latest word would misreport what the agent said (R11).
 
+**The task column is the DESCRIPTION (owner ruling, 2026-09-02).** R10 said
+"Claude's own dispatch words" and the build read `input.prompt`; on a real
+session that is the wrong half of the dispatch, because Claude opens every
+prompt the same way ("You are the builder for batch A…") and the column showed
+one identical string down the whole roster. `input.description` ("Fix
+installer.ts review findings") is equally Claude's own and is written to be
+glanceable, which is this column's entire job. The ladder, in order:
+
+1. the dispatch's `input.description`;
+2. the metadata sidecar's `description` — the stand-in for a dispatch a
+   skill-driven agent never had;
+3. the dispatch's `input.prompt`, head-first (R19 unchanged);
+4. the agent file's own opening prompt;
+5. nothing, which leaves the type alone carrying the row (R18 unchanged).
+
 **The task fallback matters for real agents.** A skill-driven agent carries
 `"name":"code-review"` and **no** `toolUseId` in its metadata — it has no
-dispatch record anywhere — so its own opening prompt is the only source of a
-task. Observed on disk.
+dispatch record anywhere — so its metadata's `description` is its only
+description, and its own opening prompt is the only thing under that. Observed
+on disk.
 
 ### The token formula
 

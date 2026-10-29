@@ -151,7 +151,7 @@ reports **every agent retirement has left standing**.
 |---|---|---|
 | `id` | string | Claude Code's agent id, or `dispatch:<toolUseId>` before the id arrives |
 | `type` | string | the subagent type (`explore`, `general-purpose`, …) |
-| `task` | string | Claude's own dispatch **prompt**, head-first — not the description |
+| `task` | string | Claude's own dispatch **description**; its prompt, head-first, when the dispatch carries none (R10 as amended 2026-09-02) |
 | `state` | `"live"` \| `"done"` \| `"failed"` | a failure never reads as done |
 | `spawnedAt` | ISO \| null | when the dispatch was recorded |
 | `ageMs` | number \| null | now − `spawnedAt` |

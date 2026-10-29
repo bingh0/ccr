@@ -329,6 +329,23 @@ function toolLine(name, input) {
 const append = (/** @type {string} */ f, /** @type {string[]} */ lines) =>
   fs.appendFileSync(f, lines.map((l) => l + '\n').join(''));
 
+/**
+ * One record of an assistant message, in upstream's real shape: a message is
+ * split across one record PER CONTENT BLOCK, every one of them repeating the
+ * same `message.id` and the same `usage` object.
+ * @param {string} id @param {any} usage @param {any} block
+ */
+function msgLine(id, usage, block) {
+  return JSON.stringify({
+    parentUuid: '00000000-0000-4000-8000-000000000001',
+    uuid: `00000000-0000-4000-8000-${String(++SEQ).padStart(12, '0')}`,
+    type: 'assistant',
+    timestamp: '2026-01-01T00:00:00Z',
+    message: { id, type: 'message', role: 'assistant', model: 'claude-opus-4-8', content: [block], usage },
+    requestId: 'req_011CReq',
+  });
+}
+
 test('updateFeed accumulates tool events incrementally and only reads new bytes', () => {
   const f = tmpFile();
   append(f, [toolLine('Edit', { file_path: 'src/a.js' }), toolLine('Bash', { description: 'run tests' })]);
@@ -399,6 +416,74 @@ test('updateFeed does not double-count when the file shrinks but keeps old conte
   const after = updateFeed(f);
   assert.strictEqual(after.tools.Edit, 2, 'counts describe the current file, not file + replay');
   assert.strictEqual(after.files.length, 2, 'the file set is rebuilt, not accumulated');
+
+  fs.unlinkSync(f);
+});
+
+test('updateFeed counts one message split across two ticks exactly once', () => {
+  // Owner ruling 2026-09-02: upstream writes ONE assistant message as one
+  // record per content block, each repeating the SAME usage, so the feed's
+  // totals count usage per message rather than per record. The tail reads
+  // whole lines by byte offset and a tick boundary can fall between two
+  // records of the same message — so the "already counted" state has to be
+  // carried in feedState across calls, or the tick that reads the rest of the
+  // message adds a second copy of its usage and the fix holds only inside one
+  // batch. This is the case features/transcripts.feature cannot reach: its
+  // scenario parses one batch.
+  //
+  // MUTATED: dropped the `priorMsgId`/`priorMsgTokens` hand-back in
+  // `updateFeed` (parse each batch from cold). This test went red on the
+  // second tick — 200/400 where the message reports 100/200 — while the
+  // feature scenario stayed green, which is exactly the split of duty the two
+  // are here for.
+  const f = tmpFile();
+  const usage = { input_tokens: 100, cache_creation_input_tokens: 10, cache_read_input_tokens: 1000, output_tokens: 200 };
+  const counted = { input: 100, output: 200, cacheRead: 1000, cacheCreate: 10 };
+
+  append(f, [msgLine('msg_01Split', usage, { type: 'thinking', thinking: 'planning' })]);
+  assert.deepStrictEqual(updateFeed(f).tokens, counted, 'the first record of the message is counted');
+
+  append(f, [
+    msgLine('msg_01Split', usage, { type: 'text', text: 'here is the plan' }),
+    msgLine('msg_01Split', usage, { type: 'tool_use', name: 'Bash', input: { description: 'run tests' } }),
+  ]);
+  assert.deepStrictEqual(updateFeed(f).tokens, counted,
+    'the rest of the same message, arriving on a later tick, adds nothing');
+
+  // …and the dedupe must not swallow the next turn: a different message id is
+  // a different turn however soon it follows.
+  append(f, [msgLine('msg_02Next', usage, { type: 'text', text: 'done' })]);
+  assert.deepStrictEqual(updateFeed(f).tokens, { input: 200, output: 400, cacheRead: 2000, cacheCreate: 20 },
+    'a new message id adds its own usage');
+
+  fs.unlinkSync(f);
+});
+
+test('a tail restart forgets the message it was left inside', () => {
+  // The carried message id travels with the totals, and must be dropped WITH
+  // them: when the file shrinks the tail restarts at byte 0 and the totals are
+  // zeroed, and a remembered id from before the restart would make the first
+  // record of that same message SUBTRACT a contribution the zeroed totals no
+  // longer hold — negative tokens, for the rest of the session.
+  //
+  // MUTATED: removed the two reset lines in `resetFeedState` (the id and its
+  // tokens survive the restart). This test went red on the second tick with
+  // all four totals at 0 where the file plainly holds one message of 100/200;
+  // every other feed test stayed green, which is why this one exists.
+  const f = tmpFile();
+  const usage = { input_tokens: 100, cache_creation_input_tokens: 10, cache_read_input_tokens: 1000, output_tokens: 200 };
+  const counted = { input: 100, output: 200, cacheRead: 1000, cacheCreate: 10 };
+
+  append(f, [
+    msgLine('msg_01Again', usage, { type: 'thinking', thinking: 'planning' }),
+    msgLine('msg_01Again', usage, { type: 'text', text: 'the plan' }),
+  ]);
+  assert.deepStrictEqual(updateFeed(f).tokens, counted);
+
+  // Replaced by a SHORTER file that opens with a record of the very same message.
+  fs.writeFileSync(f, msgLine('msg_01Again', usage, { type: 'thinking', thinking: 'planning' }) + '\n');
+  assert.deepStrictEqual(updateFeed(f).tokens, counted,
+    'after a restart the totals describe the current file; nothing from before it is subtracted');
 
   fs.unlinkSync(f);
 });

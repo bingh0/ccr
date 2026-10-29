@@ -8,8 +8,14 @@
 #   experience FOMO") and bare roster ("barely tells you more than what claude
 #   code tells you now"): pure roster, one block per agent, activity inline.
 #   NO detail zone, NO navigation keys — the only key anywhere is F3.
-# - Task column = Claude's own dispatch words (R10); empty prompt -> type
-#   alone (R18); huge prompt truncates head-first on one row (R19).
+# - Task column = Claude's own dispatch words (R10). AMENDED by the owner on
+#   2026-09-02: those words are the dispatch `description`, not the prompt —
+#   on a real session every prompt head reads "You are the builder for batch
+#   A…", while the description ("Fix installer.ts review findings") is equally
+#   Claude's own and is written to be glanceable. Empty description -> the
+#   prompt, head-first (R19 unchanged); both empty -> type alone (R18
+#   unchanged). Three scenarios below were reworded for it, under the
+#   "Sanctioned changes" entry in features/OUT-OF-SCOPE.md.
 # - Activity line = latest WORDS with an age marker (R11 final + objection-3
 #   ruling); ladder when wordless: latest tool call (R20), else quiet "...".
 # - Burst cap (R15): LIVE agents own slots first, finished fill leftovers,
@@ -62,18 +68,18 @@ Feature: Watching a session's subagents at a glance
     Then within one redraw tick the roster shows 2 live agents
 
   Scenario: The task column carries Claude's own dispatch words
-    Given Claude dispatched an agent with the prompt "Map the auth flow before touching tests"
+    Given Claude dispatched an agent described "Map the auth flow before touching tests" with a long prompt beginning "You are an explorer"
     When the block renders
     Then the task column reads "Map the auth flow before touching tests"
 
   Scenario: An enormous dispatch prompt keeps its head and fits one row
-    Given Claude dispatched an agent with a prompt 2000 characters long beginning "Audit every config file"
+    Given Claude dispatched an agent with no description and a prompt 2000 characters long beginning "Audit every config file"
     When the block renders
     Then the task column occupies exactly 1 row inside the pane width
     And the task column starts with the head of that prompt
 
   Scenario: An empty dispatch leaves the type to carry the row
-    Given Claude dispatched an agent with no prompt text
+    Given Claude dispatched an agent with no description and no prompt text
     When the block renders
     Then the block shows the agent type alone where a task would stand
 

@@ -328,12 +328,17 @@ module.exports = function defineSubagentMirrorSteps(reg) {
   const putAgent = (s, spec, now) => {
     const id = agentId();
     const tuid = toolUseId();
-    // The `description` says something else entirely: R10 puts Claude's own
-    // dispatch PROMPT in the task column, and a description quoting the prompt
-    // would let a door reading the wrong field pass this comparison.
+    // The PROMPT says something else entirely, and it is the SAME something
+    // for every agent: R10 as amended by the owner on 2026-09-02 puts Claude's
+    // own dispatch DESCRIPTION in the task column, because on a real session
+    // every prompt head reads alike. A door still reading the prompt would give
+    // every agent the same task, and the parity comparison — which pairs a
+    // pane block with the JSON agent carrying the same task — would collide on
+    // the first pair instead of comparing anything.
     s.spawn({
       toolUseId: tuid, agentId: id, at: now - spec.ageMs, subagentType: spec.type,
-      prompt: spec.task, description: 'a one-line summary nobody asked for',
+      prompt: 'You are the builder for batch A. Read the brief first, then work, then report back.',
+      description: spec.task,
     });
     s.agentTurn({
       agentId: id, at: now - spec.wordsAgoMs,

@@ -127,7 +127,12 @@ function sidecarAlive(stateDir, opts = {}) {
 // offset) and roll up tool/skill events + per-session stats. Reset on session
 // switch. Best-effort — must never break the economy panel.
 const FEED_CAP = 200;
-const feedState = { path: /** @type {string|null} */ (null), offset: 0, events: /** @type {any[]} */ ([]), tools: /** @type {Record<string,number>} */ (Object.create(null)), commands: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 }, files: new Set() };
+// `lastMsgId`/`lastMsgTokens` carry the per-message token rule ACROSS ticks:
+// one assistant message is several records, and a tick boundary can fall in
+// the middle of them, so without remembering which message this tail was left
+// inside the tick that reads the rest of it adds a second copy of the same
+// usage (owner ruling, 2026-09-02 — see parseEvents' usage branch).
+const feedState = { path: /** @type {string|null} */ (null), offset: 0, events: /** @type {any[]} */ ([]), tools: /** @type {Record<string,number>} */ (Object.create(null)), commands: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 }, files: new Set(), lastMsgId: /** @type {string|null} */ (null), lastMsgTokens: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 } };
 
 /** Zero the rolling totals — on a session switch, and on a tail restart. */
 function resetFeedState(/** @type {string|null} */ tpath) {
@@ -141,6 +146,11 @@ function resetFeedState(/** @type {string|null} */ tpath) {
   feedState.commands = 0;
   feedState.tokens = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 };
   feedState.files = new Set();
+  // The carried message goes with the totals: a restart replays records this
+  // tail has already read, and a stale message id would then subtract a
+  // contribution the zeroed totals no longer hold.
+  feedState.lastMsgId = null;
+  feedState.lastMsgTokens = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 };
 }
 
 /** @param {string} tpath @returns {any} feed view for renderFeed */
@@ -153,15 +163,21 @@ function updateFeed(tpath) {
   if (restarted) resetFeedState(tpath);
   feedState.offset = offset;
   if (lines.length) {
-    const p = parseEvents(lines);
+    const p = parseEvents(lines, { priorMsgId: feedState.lastMsgId, priorMsgTokens: feedState.lastMsgTokens });
     for (const e of p.events) feedState.events.push(e);
     if (feedState.events.length > FEED_CAP) feedState.events.splice(0, feedState.events.length - FEED_CAP);
     for (const k of Object.keys(p.stats.tools)) feedState.tools[k] = (feedState.tools[k] || 0) + p.stats.tools[k];
     feedState.commands += p.stats.commands;
+    // A DELTA, not a batch total: when this batch opens with more records of
+    // the message the previous one ended inside, the parser backs that message's
+    // already-counted usage out again, so these four can legitimately be
+    // negative and the running totals still land on the per-message figure.
     feedState.tokens.input += p.stats.tokens.input;
     feedState.tokens.output += p.stats.tokens.output;
     feedState.tokens.cacheRead += p.stats.tokens.cacheRead;
     feedState.tokens.cacheCreate += p.stats.tokens.cacheCreate;
+    feedState.lastMsgId = p.stats.lastMsgId;
+    feedState.lastMsgTokens = p.stats.lastMsgTokens;
     for (const f of p.stats.files) feedState.files.add(f);
   }
   return { events: feedState.events, tools: feedState.tools, commands: feedState.commands, tokens: feedState.tokens, files: [...feedState.files] };

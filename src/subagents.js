@@ -96,7 +96,9 @@ const MAX_DEPTH_WALK = 8;
  * @property {string} id            agentId when known, else `dispatch:<toolUseId>`
  * @property {string|null} dispatchId
  * @property {string} type          subagent_type / meta agentType
- * @property {string} task          the dispatch PROMPT, head-first (R10/R18/R19)
+ * @property {string} task          the dispatch DESCRIPTION, else its prompt
+ *                                  head-first (R10 as amended 2026-09-02,
+ *                                  R18/R19 unchanged)
  * @property {'live'|'done'|'failed'} state
  * @property {number|null} spawnedAt   ms epoch, null when upstream stamped none
  * @property {number|null} completedAt ms epoch; null NEVER retires (R37)
@@ -257,7 +259,7 @@ function createAccumulator() {
   // naming `__proto__` would perform a prototype write instead of being counted
   // — the same trap src/sidecar.js's feed accumulator documents.
 
-  /** @type {Record<string, { toolUseId: string, type: string, task: string, spawnedAt: number|null, parentAgentId: string|null }>} */
+  /** @type {Record<string, { toolUseId: string, type: string, description: string, prompt: string, spawnedAt: number|null, parentAgentId: string|null }>} */
   const dispatches = Object.create(null);
   /** @type {Record<string, string>} */
   const links = Object.create(null);           // dispatch toolUseId → agentId
@@ -270,7 +272,7 @@ function createAccumulator() {
   let noteCount = 0;
   /** @type {Record<string, { agentId: string, words: string|null, wordsAt: number|null, lastTool: string|null, lastToolArg: string|null, lastToolAt: number|null, tokens: number, firstPrompt: string|null, firstTs: number|null, msgId: string|null, msgTokens: number, lastAt: number|null }>} */
   const progress = Object.create(null);        // agentId → what its own file shows
-  /** @type {Record<string, { agentType: string, toolUseId: string|null, parentAgentId: string|null, spawnDepth: number|null }>} */
+  /** @type {Record<string, { agentType: string, description: string, toolUseId: string|null, parentAgentId: string|null, spawnDepth: number|null }>} */
   const metas = Object.create(null);           // agentId → its .meta.json
   /** @type {Record<string, ChannelReport>} */
   const channels = Object.create(null);
@@ -318,7 +320,12 @@ function createAccumulator() {
     dispatches[id] = {
       toolUseId: id,
       type: clean(input.subagent_type) || 'general-purpose',
-      task: clean(input.prompt),
+      // BOTH sides of the amended R10 are captured here (see `row` for which
+      // one carries the column): the glanceable `description` Claude writes for
+      // the dispatch, and the `prompt` it sends, which is the fallback when a
+      // dispatch carries no description at all.
+      description: clean(input.description),
+      prompt: clean(input.prompt),
       spawnedAt: ts,
       // A dispatch found INSIDE an agent file is that agent's child (R39,
       // nesting): the child's tool_use lives in the parent agent's jsonl, not
@@ -504,6 +511,13 @@ function createAccumulator() {
     const depth = Number(o.spawnDepth);
     metas[agentId] = {
       agentType: clean(o.agentType) || 'general-purpose',
+      // The metadata sidecar repeats the dispatch's description, and for a
+      // SKILL-DRIVEN agent it is the only place one exists — that agent has no
+      // dispatch record anywhere (verified: `{"agentType":…,"description":
+      // "/code-review …","name":"code-review"}` with no toolUseId). The owner's
+      // 2026-09-02 amendment says such an agent keeps its meta description
+      // first and its opening prompt second, so the field is captured here.
+      description: clean(o.description),
       toolUseId: clean(o.toolUseId) || null,
       parentAgentId: clean(o.parentAgentId) || null,
       spawnDepth: Number.isFinite(depth) && depth > 0 ? Math.trunc(depth) : null,
@@ -593,10 +607,22 @@ function createAccumulator() {
         id: agentId || `dispatch:${tuid}`,
         dispatchId: tuid || null,
         type: (d && d.type) || (m && m.agentType) || 'general-purpose',
-        // The task column is Claude's own dispatch words (R10). The agent
-        // file's opening prompt is the same text and covers the skill-driven
-        // agent that has no dispatch record.
-        task: (d && d.task) || (p && p.firstPrompt) || '',
+        // THE TASK COLUMN — R10 as AMENDED by the owner on 2026-09-02. It was
+        // the dispatch PROMPT; it is now the dispatch DESCRIPTION. On a real
+        // session every prompt head reads the same ("You are the builder for
+        // batch A…"), because that is how Claude opens a dispatch, so a
+        // prompt-first column showed one string down the whole roster. The
+        // `description` is equally Claude's own dispatch words and is written
+        // to be glanceable, which is this column's entire job.
+        //
+        // The ladder below, in order: the dispatch's description; a
+        // skill-driven agent's metadata description, which stands in for the
+        // dispatch it never had; the dispatch prompt, head-first, when the
+        // description is empty (R19, unchanged); the agent file's own opening
+        // prompt, which is the same text for an agent whose dispatch has not
+        // been read; and finally nothing, which leaves the type alone carrying
+        // the row (R18, unchanged).
+        task: (d && d.description) || (m && m.description) || (d && d.prompt) || (p && p.firstPrompt) || '',
         state: c ? c.state : 'live',
         spawnedAt: (d && d.spawnedAt != null) ? d.spawnedAt : (p ? p.firstTs : null),
         completedAt: c ? c.at : null,

@@ -2,6 +2,20 @@
 'use strict';
 // Step definitions for features/transcripts.feature — drives src/transcripts.js.
 // Builds JSONL lines in-memory (no filesystem) and runs the real parser.
+//
+// MUTATION LOG — recorded because a binding no world can make red is hollow.
+//
+//   "One message split across several records is counted once" (added for the
+//     owner's token-inflation ruling, 2026-09-02) — reverted the dedupe in
+//     `parseEvents` (dropped the `mid === lastMsgId` back-out, so every record
+//     adds its usage again) and the step went red on the input total: 300
+//     where the message reports 100. Re-mutated the other way, keying the
+//     back-out on the RECORD's `uuid` instead of `message.id` — every record
+//     has its own uuid, so nothing ever matches and the same assertion fails
+//     identically. The neighbouring "Assistant token usage is rolled up"
+//     scenario stayed green through both, which is the guard that the dedupe
+//     did not start swallowing genuinely separate turns: its two turns carry
+//     no `message.id` at all, the case the ruling leaves counting per record.
 
 const assert = require('node:assert');
 const path = require('node:path');
@@ -42,6 +56,34 @@ module.exports = function defineTranscriptSteps(reg) {
   reg.define(/^an assistant turn using (\d+) input and (\d+) output tokens$/, (w, inp, out) => {
     push(w, { type: 'assistant', timestamp: nextTs(), message: { model: 'claude-opus-4-8', usage: { input_tokens: Number(inp), output_tokens: Number(out) }, content: [{ type: 'text', text: 'ok' }] } });
   });
+  // The real record shape, not a paraphrase: upstream splits one assistant
+  // message across one record PER CONTENT BLOCK, each carrying the same
+  // `message.id` and repeating the same `usage` object, with the envelope
+  // fields (parentUuid/uuid/timestamp) that test/steps/_subagent-fixture.js
+  // copied off a 2.1.252 transcript. Summed per record that is the inflation
+  // the owner ruled out on 2026-09-02; the blocks differ so the records are
+  // the genuinely different lines upstream writes rather than one line thrice.
+  reg.define(/^an assistant message split across (\d+) records each repeating (\d+) input and (\d+) output tokens$/, (w, n, inp, out) => {
+    const id = 'msg_01SplitAcrossRecords';
+    const usage = { input_tokens: Number(inp), cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: Number(out), service_tier: 'standard' };
+    for (let i = 0; i < Number(n); i += 1) {
+      push(w, {
+        parentUuid: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+        uuid: `00000000-0000-4000-8000-${String(100 + i).padStart(12, '0')}`,
+        sessionId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+        version: '2.1.252',
+        type: 'assistant',
+        timestamp: nextTs(),
+        message: {
+          id, type: 'message', role: 'assistant', model: 'claude-opus-4-8',
+          content: [i === 0 ? { type: 'thinking', thinking: 'planning' } : { type: 'text', text: `block ${i}` }],
+          usage,
+        },
+        requestId: 'req_011CReq',
+      });
+    }
+  });
+
   reg.define(/^a malformed line$/, (w) => push(w, '{not valid json'));
   reg.define(/^a captured snapshot with transcript_path "([^"]+)"$/, (w, p) => { w.snapshot = { transcript_path: p }; });
   reg.define(/^a projects dir "([^"]+)"$/, (w, base) => { w.tbase = base; });

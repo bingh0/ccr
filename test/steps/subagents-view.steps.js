@@ -37,7 +37,8 @@
 // minus an upstream timestamp, so a "redraw" here is a compose with a later
 // `now` and nothing in this file waits on a clock.
 //
-// MUTATION LOG — 44 mutants, each applied to the PRODUCTION source, run, and
+// MUTATION LOG — 44 mutants at the build, plus 5 for the owner's 2026-09-02
+// amendment of R10, each applied to the PRODUCTION source, run, and
 // reverted. Recorded because a binding no world can make red is hollow. The
 // scenario each one turned red is named after the arrow; the two that stayed
 // GREEN are at the bottom, and both were findings about this file.
@@ -73,9 +74,38 @@
 //                                                    the inert text AND the redraw)
 //
 //   src/subagents.js
+//     [SUPERSEDED 2026-09-02 — the owner AMENDED R10 to put the dispatch
+//      DESCRIPTION in the task column, so these two mutants describe a build
+//      that no longer exists. The five that replace them are below.]
 //     task taken from the dispatch `description`  -> the glance, the task column,
 //                                                    the huge prompt, the empty one
 //     empty prompt falls back to `description`    -> the empty dispatch
+//
+//   src/subagents.js — the amended R10 (owner ruling 2026-09-02), five ways
+//     task read off the PROMPT again (the rule as
+//       it stood before the amendment)            -> the glance, the task column
+//                                                    (and the mirror's parity, and
+//                                                    two subagents.test.js cases).
+//                                                    The huge prompt and the empty
+//                                                    dispatch stay GREEN on this
+//                                                    one, correctly: neither of
+//                                                    their fixtures HAS a
+//                                                    description, so the prompt is
+//                                                    what both builds read.
+//     `description` and `prompt` swapped at
+//       CAPTURE, not at the column                -> the glance, the task column,
+//                                                    parity
+//     the prompt fallback removed (R19 skipped)   -> the huge prompt (and the
+//                                                    skill-driven agent's second
+//                                                    half in subagents.test.js)
+//     the META description ignored, so a
+//       skill-driven agent falls to its prompt    -> subagents.test.js's
+//                                                    skill-driven agent; no
+//                                                    scenario covers it, which is
+//                                                    why that unit test pins both
+//                                                    halves of the ladder
+//     a dispatch id invented where R18 says the
+//       type stands alone                         -> the empty dispatch
 //     a `thinking` block counted as words         -> the wordless agent
 //     slots filled finished-first                 -> the burst, the leftover slots
 //     finishes sorted oldest-first                -> the leftover slots
@@ -302,6 +332,16 @@ module.exports = function defineSubagentsViewSteps(reg) {
     output_tokens: n,
   });
 
+  // THE PROMPT EVERY DISPATCH BELOW SHARES. This is the fact behind the
+  // owner's 2026-09-02 amendment of R10: on a real session Claude opens every
+  // dispatch the same way, so a task column reading the prompt shows one
+  // identical string down the whole roster. Every fixture here therefore
+  // carries THIS prompt and puts the agent's own words in `description`, which
+  // makes the corpus prove the amendment rather than merely permit it — a
+  // build that read the prompt would draw the same task on every block, and
+  // every scenario that finds a block by its task fails at once.
+  const DISPATCH_PROMPT = 'You are the builder for batch A. Read the brief first, then work, then report back.';
+
   // Two INDEPENDENT counters. A single one looked fine and was not: argument
   // order meant `spawn({ toolUseId: toolUseId(), agentId: agentId() })` read the
   // counter before bumping it, so a dispatch id could repeat the previous
@@ -328,11 +368,13 @@ module.exports = function defineSubagentsViewSteps(reg) {
       w.now = T0;
       const id = agentId();
       const at = w.now - parseAge(String(ago));
-      // The description says something ELSE on purpose: R10 puts Claude's own
-      // dispatch PROMPT in the task column, and a description that quoted the
-      // prompt would let a build reading the wrong field pass (it did, until
-      // mutation-testing swapped the two fields and this stayed green).
-      w.s.spawn({ toolUseId: toolUseId(), agentId: id, at, subagentType: String(type), prompt: String(task), description: 'a one-line summary nobody asked for' });
+      // The scenario's "task" IS the description, and the prompt says something
+      // else: R10 as amended by the owner on 2026-09-02 puts Claude's own
+      // dispatch DESCRIPTION in the task column, and a prompt that quoted it
+      // would let a build reading the wrong field pass. The prompt here is the
+      // one every dispatch shares, so a build that read it would draw the same
+      // task on both blocks and this scenario's two lookups would collide.
+      w.s.spawn({ toolUseId: toolUseId(), agentId: id, at, subagentType: String(type), prompt: DISPATCH_PROMPT, description: String(task) });
       // Two seconds after the spawn: late enough to be the agent's own words,
       // early enough that the newest of these fixtures leaves the transcript
       // less than STALE_MS quiet — a stale banner here would be correct and
@@ -360,7 +402,7 @@ module.exports = function defineSubagentsViewSteps(reg) {
     w.now = T0 + 10_000;
     for (let i = 0; i < Number(n); i += 1) {
       const id = agentId();
-      w.s.spawn({ toolUseId: toolUseId(), agentId: id, at: T0 + i * 100, subagentType: 'explore', prompt: `task-${i}`, description: `d${i}` });
+      w.s.spawn({ toolUseId: toolUseId(), agentId: id, at: T0 + i * 100, subagentType: 'explore', prompt: DISPATCH_PROMPT, description: `task-${i}` });
       w.s.agentTurn({ agentId: id, at: T0 + 2000 + i * 100, blocks: [{ type: 'text', text: `working on ${i}` }] });
     }
     // The premise, checked rather than assumed: a Given that merely built files
@@ -369,19 +411,23 @@ module.exports = function defineSubagentsViewSteps(reg) {
       `the view should open showing ${n} live agent(s); got:\n${w.frame}`);
   });
 
-  reg.define(/^Claude dispatched an agent with the prompt "([^"]+)"$/, (w, prompt) => {
+  reg.define(/^Claude dispatched an agent described "([^"]+)" with a long prompt beginning "([^"]+)"$/, (w, desc, head) => {
     const made = newSession(w, 'prompt');
     w.s = made.s; w.stateDir = made.stateDir;
     w.now = T0 + 5000;
     w.agentType = 'general-purpose';
-    // The `description` differs from the prompt deliberately: R10 says the task
-    // column is Claude's own DISPATCH WORDS, and a build that reached for
-    // `description` instead is the exact confusion this scenario rules out.
-    w.s.spawn({ toolUseId: toolUseId(), agentId: agentId(), at: T0, subagentType: w.agentType, prompt: String(prompt), description: 'short summary nobody asked for' });
-    w.expectedTask = String(prompt);
+    // The PROMPT differs from the description deliberately, and it is long and
+    // preamble-shaped because that is what a real one is: R10 as amended by the
+    // owner on 2026-09-02 puts the dispatch DESCRIPTION in the task column, and
+    // a build that still reached for the prompt is the exact confusion this
+    // scenario now rules out. The `Then` compares the whole column, so a build
+    // reading the prompt fails on the first character.
+    const prompt = `${head} working on the auth surface. Read the code first, then the tests, then report back with what you found and what you changed.`;
+    w.s.spawn({ toolUseId: toolUseId(), agentId: agentId(), at: T0, subagentType: w.agentType, prompt, description: String(desc) });
+    w.expectedTask = String(desc);
   });
 
-  reg.define(/^Claude dispatched an agent with a prompt (\d+) characters long beginning "([^"]+)"$/, (w, chars, head) => {
+  reg.define(/^Claude dispatched an agent with no description and a prompt (\d+) characters long beginning "([^"]+)"$/, (w, chars, head) => {
     const made = newSession(w, 'huge');
     w.s = made.s; w.stateDir = made.stateDir;
     w.now = T0 + 5000;
@@ -391,15 +437,20 @@ module.exports = function defineSubagentsViewSteps(reg) {
     for (let i = 0; prompt.length < Number(chars); i += 1) prompt += `token-${i} `;
     w.prompt = prompt.slice(0, Number(chars));
     w.promptHead = String(head);
-    w.s.spawn({ toolUseId: toolUseId(), agentId: agentId(), at: T0, subagentType: 'explore', prompt: w.prompt, description: 'audit' });
+    // NO description, which is what makes this the R19 fallback case: with the
+    // owner's 2026-09-02 amendment the description would otherwise carry the
+    // column and the prompt's head-first truncation would never be exercised.
+    w.s.spawn({ toolUseId: toolUseId(), agentId: agentId(), at: T0, subagentType: 'explore', prompt: w.prompt, description: '' });
   });
 
-  reg.define(/^Claude dispatched an agent with no prompt text$/, (w) => {
+  reg.define(/^Claude dispatched an agent with no description and no prompt text$/, (w) => {
     const made = newSession(w, 'noprompt');
     w.s = made.s; w.stateDir = made.stateDir;
     w.now = T0 + 5000;
     w.agentType = 'general-purpose';
-    w.s.spawn({ toolUseId: toolUseId(), agentId: agentId(), at: T0, subagentType: w.agentType, prompt: '', description: 'a description that must not stand in for a prompt' });
+    // Both empty, which is R18: with neither of Claude's own words to show, the
+    // type alone carries the row and nothing is invented to fill it.
+    w.s.spawn({ toolUseId: toolUseId(), agentId: agentId(), at: T0, subagentType: w.agentType, prompt: '', description: '' });
   });
 
   reg.define(/^an explore agent whose latest words arrived (\S+) ago$/, (w, ago) => {
@@ -408,7 +459,7 @@ module.exports = function defineSubagentsViewSteps(reg) {
     w.now = T0 + 3_600_000;
     const at = w.now - parseAge(String(ago));
     const id = agentId();
-    w.s.spawn({ toolUseId: toolUseId(), agentId: id, at: at - 60_000, subagentType: 'explore', prompt: 'map auth flow', description: 'map' });
+    w.s.spawn({ toolUseId: toolUseId(), agentId: id, at: at - 60_000, subagentType: 'explore', prompt: DISPATCH_PROMPT, description: 'map auth flow' });
     w.words = 'grepping src/auth';
     w.s.agentTurn({ agentId: id, at, blocks: [{ type: 'text', text: w.words }] });
   });
@@ -419,7 +470,7 @@ module.exports = function defineSubagentsViewSteps(reg) {
     w.now = T0 + 60_000;
     const id = agentId();
     const at = w.now - Number(secs) * 1000;
-    w.s.spawn({ toolUseId: toolUseId(), agentId: id, at, subagentType: 'general-purpose', prompt: 'fix failing tests', description: 'fix' });
+    w.s.spawn({ toolUseId: toolUseId(), agentId: id, at, subagentType: 'general-purpose', prompt: DISPATCH_PROMPT, description: 'fix failing tests' });
     w.toolName = String(tool);
     w.toolArg = 'npm test';
     // A THINKING block beside the tool call, because the catalogue rules that
@@ -447,7 +498,7 @@ module.exports = function defineSubagentsViewSteps(reg) {
     w.now = T0 + 60_000;
     const at = w.now - Number(secs) * 1000;
     // Dispatch and launch only: the agent exists and has said nothing at all.
-    w.s.dispatch({ toolUseId: 'toolu_quiet0000000', at, subagentType: 'explore', prompt: 'map auth flow', description: 'map' });
+    w.s.dispatch({ toolUseId: 'toolu_quiet0000000', at, subagentType: 'explore', prompt: DISPATCH_PROMPT, description: 'map auth flow' });
     w.s.asyncLaunch({ toolUseId: 'toolu_quiet0000000', agentId: agentId(), at: at + 100 });
   });
 
@@ -465,13 +516,13 @@ module.exports = function defineSubagentsViewSteps(reg) {
       const id = agentId(); const tuid = toolUseId();
       const task = `finished-${i}`;
       w.finishedTasks.push(task);
-      w.s.spawn({ toolUseId: tuid, agentId: id, at: T0 + i, subagentType: 'review', prompt: task, description: task });
+      w.s.spawn({ toolUseId: tuid, agentId: id, at: T0 + i, subagentType: 'review', prompt: DISPATCH_PROMPT, description: task });
       w.s.notify({ toolUseId: tuid, taskId: id, at: w.now - 5_000 - i });
     }
     w.live = 0;
     const addLive = () => {
       const id = agentId();
-      w.s.spawn({ toolUseId: toolUseId(), agentId: id, at: T0 + 1000 + w.live * 10, subagentType: 'explore', prompt: `live-${w.live}`, description: 'live' });
+      w.s.spawn({ toolUseId: toolUseId(), agentId: id, at: T0 + 1000 + w.live * 10, subagentType: 'explore', prompt: DISPATCH_PROMPT, description: `live-${w.live}` });
       w.live += 1;
     };
     for (let i = 0; i < w.slots; i += 1) addLive();
@@ -494,7 +545,7 @@ module.exports = function defineSubagentsViewSteps(reg) {
     w.slots = Number(shown);
     w.total = Number(total);
     w.spawnLive = (/** @type {string} */ type, /** @type {number} */ i) => {
-      w.s.spawn({ toolUseId: toolUseId(), agentId: agentId(), at: T0 + 1000 + i * 10, subagentType: type, prompt: `${type}-${i}`, description: type });
+      w.s.spawn({ toolUseId: toolUseId(), agentId: agentId(), at: T0 + 1000 + i * 10, subagentType: type, prompt: DISPATCH_PROMPT, description: `${type}-${i}` });
     };
     for (let i = 0; i < w.slots; i += 1) w.spawnLive('general-purpose', i);
   });
@@ -520,7 +571,7 @@ module.exports = function defineSubagentsViewSteps(reg) {
     for (let i = 0; i < Number(live); i += 1) {
       const task = `live-${i}`;
       w.liveTasks.push(task);
-      w.s.spawn({ toolUseId: toolUseId(), agentId: agentId(), at: T0 + i, subagentType: 'explore', prompt: task, description: task });
+      w.s.spawn({ toolUseId: toolUseId(), agentId: agentId(), at: T0 + i, subagentType: 'explore', prompt: DISPATCH_PROMPT, description: task });
     }
     // Finished, newest LAST, each stamped inside the retirement window so the
     // ordering rule is what decides which two show and not the clock.
@@ -529,7 +580,7 @@ module.exports = function defineSubagentsViewSteps(reg) {
       const id = agentId(); const tuid = toolUseId();
       const task = `done-${i}`;
       w.finishedTasks.push(task);
-      w.s.spawn({ toolUseId: tuid, agentId: id, at: T0 + 100 + i, subagentType: 'review', prompt: task, description: task });
+      w.s.spawn({ toolUseId: tuid, agentId: id, at: T0 + 100 + i, subagentType: 'review', prompt: DISPATCH_PROMPT, description: task });
       w.s.notify({ toolUseId: tuid, taskId: id, at: w.now - 50_000 + i * 1000 });
     }
   });
@@ -541,7 +592,7 @@ module.exports = function defineSubagentsViewSteps(reg) {
     const id = agentId(); const tuid = toolUseId();
     w.retiringTask = 'audit the installer';
     w.completedAt = w.now - Number(secs) * 1000;
-    w.s.spawn({ toolUseId: tuid, agentId: id, at: w.completedAt - 120_000, subagentType: 'review', prompt: w.retiringTask, description: 'audit' });
+    w.s.spawn({ toolUseId: tuid, agentId: id, at: w.completedAt - 120_000, subagentType: 'review', prompt: DISPATCH_PROMPT, description: w.retiringTask });
     w.s.notify({ toolUseId: tuid, taskId: id, at: w.completedAt });
     // "Showing in the roster" is a fact to establish, not to assume: rendered a
     // little before the retirement clock expires, the block is really there.
@@ -558,7 +609,7 @@ module.exports = function defineSubagentsViewSteps(reg) {
     w.now = T0 + 600_000;
     const id = agentId(); const tuid = toolUseId();
     w.stayingTask = 'migrate the settings file';
-    w.s.spawn({ toolUseId: tuid, agentId: id, at: T0, subagentType: 'general-purpose', prompt: w.stayingTask, description: 'migrate' });
+    w.s.spawn({ toolUseId: tuid, agentId: id, at: T0, subagentType: 'general-purpose', prompt: DISPATCH_PROMPT, description: w.stayingTask });
     // R37: a completion Claude stamped with nothing never retires — ccr has no
     // clock of its own to retire it on without inventing one.
     w.s.notify({ toolUseId: tuid, taskId: id, at: null });
@@ -576,7 +627,7 @@ module.exports = function defineSubagentsViewSteps(reg) {
       const task = `ancient-${i}`;
       w.ancientTasks.push(task);
       const at = T0 - (3 + i) * 86_400_000;
-      w.s.spawn({ toolUseId: tuid, agentId: id, at, subagentType: 'explore', prompt: task, description: task });
+      w.s.spawn({ toolUseId: tuid, agentId: id, at, subagentType: 'explore', prompt: DISPATCH_PROMPT, description: task });
       w.s.notify({ toolUseId: tuid, taskId: id, at: at + 60_000 });
     }
     w.transcriptText = fs.readFileSync(w.s.transcript, 'utf8');
@@ -589,14 +640,14 @@ module.exports = function defineSubagentsViewSteps(reg) {
     w.failureText = String(why);
     const id = agentId(); const tuid = toolUseId();
     w.failedTask = 'summarise the release notes';
-    w.s.spawn({ toolUseId: tuid, agentId: id, at: T0, subagentType: 'general-purpose', prompt: w.failedTask, description: 'summarise' });
+    w.s.spawn({ toolUseId: tuid, agentId: id, at: T0, subagentType: 'general-purpose', prompt: DISPATCH_PROMPT, description: w.failedTask });
     w.s.notify({ toolUseId: tuid, taskId: id, at: w.now - 5_000, status: 'error', summary: w.failureText });
     // A SUCCESSFUL finish beside it, so the done glyph really is rendered
     // somewhere in this frame — that block is the witness for the refusal that
     // the failed one does not carry it.
     const okId = agentId(); const okTuid = toolUseId();
     w.doneTask = 'tidy the changelog';
-    w.s.spawn({ toolUseId: okTuid, agentId: okId, at: T0 + 10, subagentType: 'general-purpose', prompt: w.doneTask, description: 'tidy' });
+    w.s.spawn({ toolUseId: okTuid, agentId: okId, at: T0 + 10, subagentType: 'general-purpose', prompt: DISPATCH_PROMPT, description: w.doneTask });
     w.s.notify({ toolUseId: okTuid, taskId: okId, at: w.now - 4_000 });
   });
 
@@ -610,7 +661,7 @@ module.exports = function defineSubagentsViewSteps(reg) {
       const words = `walking module ${i}`;
       w.wordsShown.push(words);
       w.liveIds = (w.liveIds || []).concat(id);
-      w.s.spawn({ toolUseId: toolUseId(), agentId: id, at: T0 + i * 10, subagentType: 'explore', prompt: `sweep-${i}`, description: 'sweep' });
+      w.s.spawn({ toolUseId: toolUseId(), agentId: id, at: T0 + i * 10, subagentType: 'explore', prompt: DISPATCH_PROMPT, description: `sweep-${i}` });
       w.s.agentTurn({ agentId: id, at: w.lastEventAt - i * 10, blocks: [{ type: 'text', text: words }] });
     }
     // A second into the silence: the roster is full and NOT stale, so the mark
@@ -638,7 +689,7 @@ module.exports = function defineSubagentsViewSteps(reg) {
       const words = `walking module ${i}`;
       w.liveIds.push(id);
       w.wordsShown.push(words);
-      w.s.spawn({ toolUseId: toolUseId(), agentId: id, at: T0 + i * 10, subagentType: 'explore', prompt: `sweep-${i}`, description: 'sweep' });
+      w.s.spawn({ toolUseId: toolUseId(), agentId: id, at: T0 + i * 10, subagentType: 'explore', prompt: DISPATCH_PROMPT, description: `sweep-${i}` });
       w.s.agentTurn({ agentId: id, at: w.lastEventAt - i * 10, blocks: [{ type: 'text', text: words }] });
     }
     w.staleAt = w.lastEventAt + Number(secs) * 1000;
@@ -655,13 +706,13 @@ module.exports = function defineSubagentsViewSteps(reg) {
     w.now = T0 + 20_000;
     w.parentId = agentId();
     w.parentTask = 'audit the whole corpus';
-    w.s.spawn({ toolUseId: toolUseId(), agentId: w.parentId, at: T0, subagentType: 'explore', prompt: w.parentTask, description: 'audit' });
+    w.s.spawn({ toolUseId: toolUseId(), agentId: w.parentId, at: T0, subagentType: 'explore', prompt: DISPATCH_PROMPT, description: w.parentTask });
     w.childTask = 'audit the removed behaviour';
     // `into` puts the child's dispatch inside the PARENT AGENT's own jsonl,
     // which is where a nested dispatch really lives (docs/SUBAGENTS.md).
     w.s.spawn({
       toolUseId: toolUseId(), agentId: agentId(), at: T0 + 5_000,
-      subagentType: 'explore', prompt: w.childTask, description: 'audit b',
+      subagentType: 'explore', prompt: DISPATCH_PROMPT, description: w.childTask,
       parentAgentId: w.parentId, spawnDepth: 2,
     });
   });
@@ -676,7 +727,7 @@ module.exports = function defineSubagentsViewSteps(reg) {
     // these bytes if a fetched page did.
     w.hostile = '\x1b]0;PWNED\x07 \x1b[31mRED\x1b[0m \x1b[2Jcleared \x7f end';
     const id = agentId();
-    w.s.spawn({ toolUseId: toolUseId(), agentId: id, at: T0, subagentType: 'explore', prompt: 'read the page', description: 'read' });
+    w.s.spawn({ toolUseId: toolUseId(), agentId: id, at: T0, subagentType: 'explore', prompt: DISPATCH_PROMPT, description: 'read the page' });
     w.s.agentTurn({ agentId: id, at: w.now - 5_000, blocks: [{ type: 'text', text: w.hostile }] });
   });
 
@@ -686,7 +737,7 @@ module.exports = function defineSubagentsViewSteps(reg) {
     w.now = T0 + 60_000;
     w.secret = String(secret);
     const id = agentId();
-    w.s.spawn({ toolUseId: toolUseId(), agentId: id, at: T0, subagentType: 'explore', prompt: 'read the config', description: 'read' });
+    w.s.spawn({ toolUseId: toolUseId(), agentId: id, at: T0, subagentType: 'explore', prompt: DISPATCH_PROMPT, description: 'read the config' });
     w.s.agentTurn({ agentId: id, at: w.now - 5_000, blocks: [{ type: 'text', text: `found ${w.secret} in the env` }] });
   });
 
@@ -705,7 +756,7 @@ module.exports = function defineSubagentsViewSteps(reg) {
         slug: `-tmp-tab${i}`,
       });
       const task = `tab${i}-secret-work`;
-      s.spawn({ toolUseId: toolUseId(), agentId: agentId(), at: T0, subagentType: `worker${i}`, prompt: task, description: task });
+      s.spawn({ toolUseId: toolUseId(), agentId: agentId(), at: T0, subagentType: `worker${i}`, prompt: DISPATCH_PROMPT, description: task });
       writeStatus(slot.stateDir, s.transcript);
       w.instances.push({ n: i, s, task, type: `worker${i}`, stateDir: slot.stateDir });
     }
@@ -739,7 +790,7 @@ module.exports = function defineSubagentsViewSteps(reg) {
     // something of their own to show and neither is identified by an empty
     // state that any broken view could imitate.
     const id = agentId();
-    s.spawn({ toolUseId: toolUseId(), agentId: id, at: T0, subagentType: 'explore', prompt: 'map auth flow', description: 'map' });
+    s.spawn({ toolUseId: toolUseId(), agentId: id, at: T0, subagentType: 'explore', prompt: DISPATCH_PROMPT, description: 'map auth flow' });
     s.raw([JSON.stringify({
       type: 'assistant', timestamp: new Date(T0 + 1000).toISOString(),
       message: { id: 'msg_feed', role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_feed01', name: 'Read', input: { file_path: '/tmp/work/auth.js' } }] },
@@ -773,7 +824,7 @@ module.exports = function defineSubagentsViewSteps(reg) {
 
   reg.define(/^Claude spawns another agent$/, (w) => {
     const id = agentId();
-    w.s.spawn({ toolUseId: toolUseId(), agentId: id, at: w.now - 500, subagentType: 'general-purpose', prompt: 'the newcomer', description: 'new' });
+    w.s.spawn({ toolUseId: toolUseId(), agentId: id, at: w.now - 500, subagentType: 'general-purpose', prompt: DISPATCH_PROMPT, description: 'the newcomer' });
     w.newcomerTask = 'the newcomer';
   });
 
@@ -963,7 +1014,7 @@ module.exports = function defineSubagentsViewSteps(reg) {
   /** A one-agent session, rendered only to witness what a block looks like. */
   function makeWitness(/** @type {Record<string, any>} */ w) {
     const made = newSession(w, 'witness');
-    made.s.spawn({ toolUseId: toolUseId(), agentId: agentId(), at: T0, subagentType: 'explore', prompt: 'a real block', description: 'real' });
+    made.s.spawn({ toolUseId: toolUseId(), agentId: agentId(), at: T0, subagentType: 'explore', prompt: DISPATCH_PROMPT, description: 'a real block' });
     w.witnessStateDir = made.stateDir;
     return made.stateDir;
   }

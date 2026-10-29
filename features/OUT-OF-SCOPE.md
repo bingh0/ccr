@@ -378,3 +378,14 @@ Bound scenarios whose text changes at build, sanctioned here before build
   indicators, **if** built-in indexing shifts them. **Direction: rewords**
   (conditional). Sanctioning ruling: same rotation ruling. Flagged possible,
   not certain, until the build fixes index arithmetic.
+- `subagents-view.feature` — the three task-column scenarios ("The task column
+  carries Claude's own dispatch words", "An enormous dispatch prompt keeps its
+  head and fits one row", "An empty dispatch leaves the type to carry the
+  row"). **Direction: rewords.** The Givens now name a dispatch `description`
+  where they named a prompt: the first is described and given a long prompt,
+  the second and third say "no description" explicitly. Every `Then` is
+  unchanged, and so is every other line of the file. Sanctioning ruling: the
+  owner's amendment of R10 (2026-09-02) — the task column is Claude's dispatch
+  `description`, falling back to the prompt head-first (R19) and then to the
+  type alone (R18), because on a real session every prompt head reads alike
+  while the description is written to be glanceable.

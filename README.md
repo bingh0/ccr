@@ -23,7 +23,9 @@ shows you the **economy** of a session:
   slash-command calls plus per-session stats (files touched, tokens generated).
 - **Resume advisor** (`ccr resume`) — recent sessions ranked by what they'd cost
   to bring back (context size, share of the window, cold/warm cache), then it
-  hands selection to `claude --resume`.
+  hands selection to `claude --resume`. Scoped to the current project; add the
+  positional `ccr resume all` to widen it to every project. (`--all` belongs to
+  `ccr subagents` and is refused here, loudly, rather than silently ignored.)
 - **Git pane** — press **F3** in the sidebar for the repo each tab is in: the
   repo and branch, what's staged / modified / untracked / conflicted, and
   recent commits drawn in lanes like an IDE git graph. Read from `.git`
@@ -63,7 +65,7 @@ npm i -g claude-code-runrate
 |---|---|:--:|:--:|:--:|
 | `ccr economy` (CLI report) | Full panel on demand | ✅ | ✅ | ✅ |
 | `ccr economy --json` | Stable machine-readable model (scripting) | ✅ | ✅ | ✅ |
-| `ccr resume` | Recent sessions ranked by cost to resume | ✅ | ✅ | ✅ |
+| `ccr resume [all]` | Recent sessions ranked by cost to resume (`all` = every project) | ✅ | ✅ | ✅ |
 | `ccr subagents` | This session's subagent roster as JSON (read-only) | ✅ | ✅ | ✅ |
 | `ccr statusline` | One-line summary wired into CC's `statusLine` | ✅ | ✅ | ✅ |
 | `ccr sidecar` | Live dashboard + tool/skills feed | ✅ tmux | ✅ tmux | ✅ Windows Terminal / VS Code |
@@ -174,9 +176,10 @@ ccr subagents --all            # every live instance, rolled up
 ccr subagents -i side-project --debug   # plus the channels read and how fresh each is
 ```
 
-Each agent carries its type, Claude's own dispatch prompt, its state, age,
-token count, latest words and how old they are, its latest tool call, and its
-lineage. The object's **first property is `instance`** — the name the chain
+Each agent carries its type, Claude's own dispatch description — the short,
+glanceable line Claude writes for the task, falling back to the prompt when a
+dispatch carries none — its state, age, token count, latest words and how old
+they are, its latest tool call, and its lineage. The object's **first property is `instance`** — the name the chain
 resolved — so the reading names what it is about without breaking `| jq`.
 
 It is **read-only**: the roster is derived from Claude Code's own transcripts,

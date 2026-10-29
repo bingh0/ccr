@@ -46,7 +46,7 @@ const agent = (m, id) => {
 
 test('the async launch result links a dispatch id to its agent id', () => {
   const s = buildSession(projectsRoot());
-  s.dispatch({ toolUseId: 'toolu_01MYgGNQrNTfhLwokWuh3oxx', prompt: 'Map the auth flow', subagentType: 'explore', at: T0 });
+  s.dispatch({ toolUseId: 'toolu_01MYgGNQrNTfhLwokWuh3oxx', description: 'Map the auth flow', prompt: 'You are an explorer. Read the code first.', subagentType: 'explore', at: T0 });
   s.asyncLaunch({ toolUseId: 'toolu_01MYgGNQrNTfhLwokWuh3oxx', agentId: 'a4e4cc6b8ee1a633e', at: T0 + 1500 });
 
   const m = readRoster(s.transcript, { now: NOW });
@@ -318,22 +318,35 @@ test('activity in the agent file after its completion reads as live again', () =
   assert.strictEqual(a.words, 'resumed, re-checking');
 });
 
-test('a skill-driven agent with no dispatch still rosters, with its prompt as the task', () => {
+test('a skill-driven agent with no dispatch takes its task from its metadata, then its prompt', () => {
   // Verified on disk: `{"agentType":…,"description":"/code-review …","name":"code-review","spawnDepth":1}`
   // and no toolUseId at all, so the agent exists only as a file plus metadata.
+  // The owner's amended R10 (2026-09-02) says such an agent keeps its metadata
+  // DESCRIPTION first — it is the only description it has, there being no
+  // dispatch — and falls back to its own opening prompt when the metadata
+  // carries none. Both halves are pinned here, in one world, because a build
+  // that honoured only one of them would still look right from the other side.
   const s = buildSession(projectsRoot());
   s.meta({ agentId: 'askill0000000000a', description: '/code-review v0.1.0-rc.5..HEAD high', name: 'code-review', spawnDepth: 1 });
   s.agentPrompt({ agentId: 'askill0000000000a', prompt: 'Review target: rc.5..HEAD', at: T0 });
+  s.meta({ agentId: 'askill0000000000b', description: '', name: 'code-review', spawnDepth: 1 });
+  s.agentPrompt({ agentId: 'askill0000000000b', prompt: 'Review target: HEAD~3..HEAD', at: T0 });
 
-  const a = agent(readRoster(s.transcript, { now: NOW }), 'askill0000000000a');
-  assert.strictEqual(a.task, 'Review target: rc.5..HEAD');
+  const m = readRoster(s.transcript, { now: NOW });
+  const a = agent(m, 'askill0000000000a');
+  assert.strictEqual(a.task, '/code-review v0.1.0-rc.5..HEAD high');
   assert.strictEqual(a.dispatchId, null);
   assert.strictEqual(a.state, 'live');
+  assert.strictEqual(agent(m, 'askill0000000000b').task, 'Review target: HEAD~3..HEAD',
+    'with no description anywhere, the opening prompt is the only words the agent has');
 });
 
 test('control characters are stripped at capture, in words and task alike', () => {
   const s = buildSession(projectsRoot());
-  s.spawn({ toolUseId: 'toolu_01Esc', agentId: 'aescape000000000a', at: T0, prompt: 'audit \x1b[31mconfig\x1b[0m files' });
+  // The escape sequence rides the DESCRIPTION, which is what the task column
+  // now reads (R10 as amended, 2026-09-02); the prompt carries one too, so the
+  // fallback path is sanitized under the same assertion whichever one wins.
+  s.spawn({ toolUseId: 'toolu_01Esc', agentId: 'aescape000000000a', at: T0, description: 'audit \x1b[31mconfig\x1b[0m files', prompt: 'audit \x1b[31mconfig\x1b[0m files' });
   s.agentTurn({ agentId: 'aescape000000000a', at: T0 + 1_000, blocks: [{ type: 'text', text: 'wrote \x1b]0;pwned\x07 the file' }] });
 
   const a = agent(readRoster(s.transcript, { now: NOW }), 'aescape000000000a');
