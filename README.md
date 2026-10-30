@@ -293,6 +293,11 @@ canonical source; `test/gherkin.js` is a vendored copy). See
 [`docs/GHERKIN.md`](docs/GHERKIN.md) for the grammar, the deliberate limits,
 and the API.
 
+Green is not proof: how a suite lies above the harness's guards — hollow
+(`cino:`, completion in name only) versus absent (`blind:`, never written)
+— is mapped once, per rung with its tell and catch, in gherkin-node-test's
+[failure ladder](https://github.com/bingh0/gherkin-node-test/blob/main/docs/failure-ladder.md); ccr's history supplied several of its specimens.
+
 The *practice* is documented separately in [`docs/BDD.md`](docs/BDD.md): what
 these scenarios (271 of them, at 0.4.0) took from conventional BDD, where they departed — refusals
 as a quarter of the specification, tags that are gates rather than filters,
