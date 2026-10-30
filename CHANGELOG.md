@@ -7,6 +7,60 @@ version is worth upgrading to, and where to read the rest.
 
 Dates are npm publish dates, because that is when a version reached anyone.
 
+## 0.7.0 — 2026-10-30
+
+When Claude fans a session out to subagents, ccr now shows them. The sidebar
+gains a fourth view and the CLI a fourth read-only door, both drawn from one
+roster that reads Claude Code's own records under `~/.claude/projects` and
+nothing else. Building it surfaced a counting error the feed had carried
+for some time, and a helper the F3 key could not find; both are fixed here.
+
+- **The subagent roster.** Press the view key past economy, git and feed and
+  the sidebar lists every agent of this session: its type, Claude's own
+  dispatch words, age and tokens, then its latest words or latest tool call.
+  Failures render as failures and never as done; nested agents keep their
+  own block under a lineage prefix; an overflow line counts what the slots
+  cannot hold and names the live work among it; when the whole transcript
+  goes quiet the view says how stale it is and keeps the words rather than
+  erasing them. `ccr subagents [-i <name>] [--all] [--debug]` prints the same
+  facts as one JSON object, headed by the instance it resolved to, so a
+  script never reads the right roster about the wrong session. The pane and
+  the command render one `rosterView`, so they cannot disagree; a parity
+  scenario holds them to the same facts. Nothing is persisted or written.
+  The shapes read, and the ones reconstructed, are catalogued in
+  `docs/SUBAGENTS.md`; the JSON in `docs/JSON-CONTRACT.md`.
+- **The task column shows the dispatch description first.** On a real
+  session every prompt opens the same way, so a prompt-first column drew one
+  identical string down the roster. The ladder is now description, then a
+  skill-driven agent's metadata description, then the prompt's head, then
+  the agent's own opening words, then the type alone.
+- **Feed tokens are counted once per message.** Claude Code writes one
+  assistant message as one record per content block, each repeating the same
+  usage. Summing per record roughly doubled every total on a multi-block
+  turn: one real session's 87.0M became 41.6M once corrected, and another's
+  203K output tokens became 65K. The feed and its incremental tail now remember
+  the message id and count it once, across tick boundaries and across a tail
+  restart. `ccr resume` and `ccr economy --json` were never inflated.
+- **F3 works after the launcher exits.** F3 printed `returned 127` on every
+  press under a detach-then-attach or a boot wrapper, and again under mosh.
+  The tmux binding outlives the launcher, but the helper it named was a
+  mktemp file the launcher's exit trap removed. The helper now lives in the
+  profile's state directory, owner-only and rewritten each launch; the
+  leaked `/tmp/ccr-cycle.*` files were the mirror symptom and stop too.
+- **An explicitly namespaced launch gets a title.** `CCR_SESSION` and
+  `CCR_STATE_DIR` rightly skip slot allocation, but the title was composed
+  inside the slot path, so every launch through the documented overrides
+  left the terminal title untouched. Over mosh that read as "ccr can't set
+  the title bar". Such a launch now gets the same ruled address, minus the
+  collision suffix that only a slot needs.
+- **`ccr resume all` is the widener; `--all` is refused.** The flag branch
+  was dead and advertised a spelling the CLI rejects. The positional is
+  documented; the flag belongs to `ccr subagents` alone and says so.
+
+Toolchain only: oxlint and `@types/node` move to current stable; TypeScript
+holds at 5.9, since 7.0 drops the vendored step registry's JSDoc signatures
+and reports 1,519 errors against a tree that has none.
+
 ## 0.6.2 — 2026-09-09
 
 The economy screen was wider than the sidebar it lives in. On a default-size
